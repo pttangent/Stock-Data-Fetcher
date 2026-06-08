@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: stocks
+    description: Stock data operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,84 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /stocks/history:
+    get:
+      operationId: getStockHistory
+      tags: [stocks]
+      summary: Get stock historical data
+      description: Fetch OHLCV historical data for a stock via Yahoo Finance
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Stock ticker symbol (e.g. AAPL, TSLA, 2330.TW)
+        - name: period
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [1d, max]
+          description: Time range - "1d" for today, "max" for full history
+        - name: interval
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 1h, 1d]
+          description: Data interval/resolution
+      responses:
+        "200":
+          description: Historical data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockHistoryResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /stocks/info:
+    get:
+      operationId: getStockInfo
+      tags: [stocks]
+      summary: Get stock metadata/info
+      description: Fetch basic metadata for a stock symbol
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Stock ticker symbol
+      responses:
+        "200":
+          description: Stock info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockInfo"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +113,78 @@ components:
           type: string
       required:
         - status
-
+    OHLCVBar:
+      type: object
+      properties:
+        date:
+          type: string
+          description: ISO timestamp
+        open:
+          type: ["number", "null"]
+        high:
+          type: ["number", "null"]
+        low:
+          type: ["number", "null"]
+        close:
+          type: ["number", "null"]
+        volume:
+          type: ["integer", "null"]
+      required:
+        - date
+    StockHistoryResult:
+      type: object
+      properties:
+        symbol:
+          type: string
+        period:
+          type: string
+        interval:
+          type: string
+        rowCount:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OHLCVBar"
+        fetchedAt:
+          type: string
+          description: ISO timestamp when data was fetched
+      required:
+        - symbol
+        - period
+        - interval
+        - rowCount
+        - data
+        - fetchedAt
+    StockInfo:
+      type: object
+      properties:
+        symbol:
+          type: string
+        shortName:
+          type: ["string", "null"]
+        longName:
+          type: ["string", "null"]
+        currency:
+          type: ["string", "null"]
+        exchange:
+          type: ["string", "null"]
+        regularMarketPrice:
+          type: ["number", "null"]
+        regularMarketChangePercent:
+          type: ["number", "null"]
+        marketCap:
+          type: ["number", "null"]
+        fiftyTwoWeekHigh:
+          type: ["number", "null"]
+        fiftyTwoWeekLow:
+          type: ["number", "null"]
+      required:
+        - symbol
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
