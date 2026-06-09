@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format } from "date-fns";
 import { Loader2, Copy, CheckCircle2, XCircle } from "lucide-react";
+import CandlestickChart from "@/components/CandlestickChart";
 
 type Period = "1d" | "max";
 type Interval = "1m" | "5m" | "15m" | "1h" | "1d";
@@ -17,6 +18,7 @@ export default function Home() {
   const [interval, setInterval] = useState<Interval>("1m");
   
   const [results, setResults] = useState<StockHistoryResult[]>([]);
+  const [activeResultIdx, setActiveResultIdx] = useState(0);
   const [isFetching, setIsFetching] = useState(false);
   const [copyStatus, setCopyStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -57,6 +59,7 @@ export default function Home() {
       const promises = queries.map(q => getStockHistory({ symbol, ...q }));
       const res = await Promise.all(promises);
       setResults(res);
+      setActiveResultIdx(0);
       await copyToClipboard(res, symbol);
     } catch (err: any) {
       console.error("Query failed", err);
@@ -252,66 +255,95 @@ export default function Home() {
               </div>
             )}
 
-            {!isFetching && results.map((result, idx) => (
-              <div key={`${result.period}-${result.interval}-${idx}`} className="border border-border bg-card overflow-hidden">
-                <div className="bg-muted/30 px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <Badge variant="outline" className="font-mono bg-background text-foreground rounded-none border-border">
-                      {result.symbol}
-                    </Badge>
-                    <div className="flex items-center gap-2 text-xs uppercase text-muted-foreground tracking-wider">
-                      <span>P:<span className="text-foreground font-bold">{result.period}</span></span>
-                      <span>I:<span className="text-foreground font-bold">{result.interval}</span></span>
-                      <span>Rows:<span className="text-foreground font-bold">{result.rowCount.toLocaleString()}</span></span>
+            {!isFetching && results.length > 0 && (
+              <div className="space-y-4">
+                {results.length > 1 && (
+                  <div className="flex items-center gap-2 border-b border-border">
+                    {results.map((result, idx) => (
+                      <button
+                        key={`${result.period}-${result.interval}-${idx}`}
+                        onClick={() => setActiveResultIdx(idx)}
+                        className={`px-4 py-2 text-sm font-mono uppercase tracking-widest border-b-2 transition-colors ${
+                          activeResultIdx === idx
+                            ? "border-primary text-primary"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {result.interval}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {(() => {
+                  const result = results[activeResultIdx] || results[0];
+                  return (
+                    <div key={`${result.period}-${result.interval}-${activeResultIdx}`} className="border border-border bg-card overflow-hidden">
+                      <div className="p-4 border-b border-border bg-muted/10">
+                        <CandlestickChart data={result.data} interval={result.interval} />
+                      </div>
+
+                      <div className="bg-muted/30 px-4 py-3 border-b border-border flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                          <Badge variant="outline" className="font-mono bg-background text-foreground rounded-none border-border">
+                            {result.symbol}
+                          </Badge>
+                          <div className="flex items-center gap-2 text-xs uppercase text-muted-foreground tracking-wider">
+                            <span>P:<span className="text-foreground font-bold">{result.period}</span></span>
+                            <span>I:<span className="text-foreground font-bold">{result.interval}</span></span>
+                            <span>Rows:<span className="text-foreground font-bold">{result.rowCount.toLocaleString()}</span></span>
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {format(new Date(result.fetchedAt), "yyyy-MM-dd HH:mm:ss")}
+                        </div>
+                      </div>
+                      
+                      <div className="overflow-x-auto">
+                        <Table className="font-mono text-xs">
+                          <TableHeader className="bg-muted/10">
+                            <TableRow className="border-border">
+                              <TableHead className="text-muted-foreground uppercase py-2">Date (ISO)</TableHead>
+                              <TableHead className="text-muted-foreground uppercase py-2 text-right">Open</TableHead>
+                              <TableHead className="text-muted-foreground uppercase py-2 text-right">High</TableHead>
+                              <TableHead className="text-muted-foreground uppercase py-2 text-right">Low</TableHead>
+                              <TableHead className="text-muted-foreground uppercase py-2 text-right">Close</TableHead>
+                              <TableHead className="text-muted-foreground uppercase py-2 text-right">Volume</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {result.data.slice(0, 5).map((row, i) => (
+                              <TableRow key={i} className="border-border">
+                                <TableCell className="whitespace-nowrap text-muted-foreground">{row.date}</TableCell>
+                                <TableCell className="text-right">{row.open?.toFixed(4) || "N/A"}</TableCell>
+                                <TableCell className="text-right">{row.high?.toFixed(4) || "N/A"}</TableCell>
+                                <TableCell className="text-right">{row.low?.toFixed(4) || "N/A"}</TableCell>
+                                <TableCell className="text-right font-bold text-primary">{row.close?.toFixed(4) || "N/A"}</TableCell>
+                                <TableCell className="text-right text-muted-foreground">{row.volume?.toLocaleString() || "N/A"}</TableCell>
+                              </TableRow>
+                            ))}
+                            {result.data.length > 5 && (
+                              <TableRow className="border-none hover:bg-transparent">
+                                <TableCell colSpan={6} className="text-center py-4 text-muted-foreground opacity-50 italic">
+                                  ... {result.data.length - 5} more rows fetched
+                                </TableCell>
+                              </TableRow>
+                            )}
+                            {result.data.length === 0 && (
+                              <TableRow>
+                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                  No data returned
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {format(new Date(result.fetchedAt), "yyyy-MM-dd HH:mm:ss")}
-                  </div>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <Table className="font-mono text-xs">
-                    <TableHeader className="bg-muted/10">
-                      <TableRow className="border-border">
-                        <TableHead className="text-muted-foreground uppercase py-2">Date (ISO)</TableHead>
-                        <TableHead className="text-muted-foreground uppercase py-2 text-right">Open</TableHead>
-                        <TableHead className="text-muted-foreground uppercase py-2 text-right">High</TableHead>
-                        <TableHead className="text-muted-foreground uppercase py-2 text-right">Low</TableHead>
-                        <TableHead className="text-muted-foreground uppercase py-2 text-right">Close</TableHead>
-                        <TableHead className="text-muted-foreground uppercase py-2 text-right">Volume</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {result.data.slice(0, 5).map((row, i) => (
-                        <TableRow key={i} className="border-border">
-                          <TableCell className="whitespace-nowrap text-muted-foreground">{row.date}</TableCell>
-                          <TableCell className="text-right">{row.open?.toFixed(4) || "N/A"}</TableCell>
-                          <TableCell className="text-right">{row.high?.toFixed(4) || "N/A"}</TableCell>
-                          <TableCell className="text-right">{row.low?.toFixed(4) || "N/A"}</TableCell>
-                          <TableCell className="text-right font-bold text-primary">{row.close?.toFixed(4) || "N/A"}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{row.volume?.toLocaleString() || "N/A"}</TableCell>
-                        </TableRow>
-                      ))}
-                      {result.data.length > 5 && (
-                        <TableRow className="border-none hover:bg-transparent">
-                          <TableCell colSpan={6} className="text-center py-4 text-muted-foreground opacity-50 italic">
-                            ... {result.data.length - 5} more rows fetched
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {result.data.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                            No data returned
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                  );
+                })()}
               </div>
-            ))}
+            )}
           </div>
         </div>
 
