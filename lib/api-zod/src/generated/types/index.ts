@@ -18,3 +18,4 @@ export * from './oHLCVBar';
 export * from './stockHistoryResult';
 export * from './stockInfo';
 export * from './symbolSummaryItem';
+export * from './symbolSummaryItemLatestSession';

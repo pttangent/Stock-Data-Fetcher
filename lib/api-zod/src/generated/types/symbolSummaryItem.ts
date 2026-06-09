@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SymbolSummaryItemLatestSession } from './symbolSummaryItemLatestSession';
 
 export interface SymbolSummaryItem {
   symbol: string;
@@ -14,91 +15,79 @@ export interface SymbolSummaryItem {
   exchange?: string | null;
   /** @nullable */
   currency?: string | null;
+  /**
+     * Previous regular-session close (regularMarketPreviousClose)
+     * @nullable
+     */
+  prevClose?: number | null;
   /** @nullable */
   dayOpen?: number | null;
   /** @nullable */
   dayHigh?: number | null;
   /** @nullable */
   dayLow?: number | null;
-  /** @nullable */
+  /**
+     * Most recent regular-session close price
+     * @nullable
+     */
   dayClose?: number | null;
   /** @nullable */
   dayVolume?: number | null;
   /**
-     * (close/open - 1) * 100
+     * (dayClose / dayOpen - 1) * 100 — intraday move within the session
      * @nullable
      */
-  dayReturnPct?: number | null;
+  intradayReturnPct?: number | null;
   /**
-     * Most recent price (may be after-hours)
+     * (dayClose / prevClose - 1) * 100 — overnight + intraday return vs prior close
+     * @nullable
+     */
+  vsPreClosePct?: number | null;
+  /**
+     * Most recent 1m bar close (pre/regular/after-hours)
      * @nullable
      */
   latestPrice?: number | null;
+  /**
+     * Session type of the most recent 1m bar
+     * @nullable
+     */
+  latestSession?: SymbolSummaryItemLatestSession;
+  /**
+     * (latestPrice / prevClose - 1) * 100
+     * @nullable
+     */
+  latestChgPct?: number | null;
   /**
      * Timestamp of the latest 1m bar in ET
      * @nullable
      */
   latestBarTimeEt?: string | null;
   /**
-     * True if the latest bar is after regular session close
+     * ET date of the trading day used for VWAP calculation
      * @nullable
      */
-  isAfterHours?: boolean | null;
+  vwapDate?: string | null;
   /**
-     * True if the latest bar is before regular session open
-     * @nullable
-     */
-  isPremarket?: boolean | null;
-  /**
-     * After-hours price from Yahoo quote fields
-     * @nullable
-     */
-  postMarketPrice?: number | null;
-  /**
-     * Pre-market price from Yahoo quote fields
-     * @nullable
-     */
-  preMarketPrice?: number | null;
-  /**
-     * Best available after-hours price (1m bar or quote fallback)
-     * @nullable
-     */
-  afterHoursPrice?: number | null;
-  /**
-     * (afterHoursPrice / dayClose - 1) * 100
-     * @nullable
-     */
-  afterHoursVsDayClosePct?: number | null;
-  /**
-     * Number of 1m bars in regular session (09:30-16:00 ET)
+     * Number of regular-session 1m bars in the VWAP day
      * @nullable
      */
   regularBarCount?: number | null;
   /**
-     * Total 1m bars including pre/post market
+     * Total 1m bars fetched across all dates
      * @nullable
      */
   intradayBarCount?: number | null;
   /**
-     * Final cumulative VWAP value at end of regular session
+     * Cumulative VWAP at end of regular session on vwapDate
      * @nullable
      */
   intradayVwapLast?: number | null;
-  /**
-     * (latestPrice / intradayVwapLast - 1) * 100
-     * @nullable
-     */
-  currentVsVwapPct?: number | null;
   /**
      * Percent of regular-session 1m bars where close > VWAP
      * @nullable
      */
   pctRegularMinutesAboveVwap?: number | null;
-  /**
-     * Percent of after-hours bars where close > regular-session VWAP
-     * @nullable
-     */
-  pctAfterHoursAboveVwap?: number | null;
   /**
      * Error message if this symbol failed to fetch
      * @nullable

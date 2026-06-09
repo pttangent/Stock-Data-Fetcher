@@ -241,6 +241,9 @@ components:
           type: ["string", "null"]
         currency:
           type: ["string", "null"]
+        prevClose:
+          type: ["number", "null"]
+          description: Previous regular-session close (regularMarketPreviousClose)
         dayOpen:
           type: ["number", "null"]
         dayHigh:
@@ -249,53 +252,43 @@ components:
           type: ["number", "null"]
         dayClose:
           type: ["number", "null"]
+          description: Most recent regular-session close price
         dayVolume:
           type: ["integer", "null"]
-        dayReturnPct:
+        intradayReturnPct:
           type: ["number", "null"]
-          description: (close/open - 1) * 100
+          description: (dayClose / dayOpen - 1) * 100 — intraday move within the session
+        vsPreClosePct:
+          type: ["number", "null"]
+          description: (dayClose / prevClose - 1) * 100 — overnight + intraday return vs prior close
         latestPrice:
           type: ["number", "null"]
-          description: Most recent price (may be after-hours)
+          description: Most recent 1m bar close (pre/regular/after-hours)
+        latestSession:
+          type: ["string", "null"]
+          enum: ["premarket", "regular", "afterhours", null]
+          description: Session type of the most recent 1m bar
+        latestChgPct:
+          type: ["number", "null"]
+          description: (latestPrice / prevClose - 1) * 100
         latestBarTimeEt:
           type: ["string", "null"]
           description: Timestamp of the latest 1m bar in ET
-        isAfterHours:
-          type: ["boolean", "null"]
-          description: True if the latest bar is after regular session close
-        isPremarket:
-          type: ["boolean", "null"]
-          description: True if the latest bar is before regular session open
-        postMarketPrice:
-          type: ["number", "null"]
-          description: After-hours price from Yahoo quote fields
-        preMarketPrice:
-          type: ["number", "null"]
-          description: Pre-market price from Yahoo quote fields
-        afterHoursPrice:
-          type: ["number", "null"]
-          description: Best available after-hours price (1m bar or quote fallback)
-        afterHoursVsDayClosePct:
-          type: ["number", "null"]
-          description: (afterHoursPrice / dayClose - 1) * 100
+        vwapDate:
+          type: ["string", "null"]
+          description: ET date of the trading day used for VWAP calculation
         regularBarCount:
           type: ["integer", "null"]
-          description: Number of 1m bars in regular session (09:30-16:00 ET)
+          description: Number of regular-session 1m bars in the VWAP day
         intradayBarCount:
           type: ["integer", "null"]
-          description: Total 1m bars including pre/post market
+          description: Total 1m bars fetched across all dates
         intradayVwapLast:
           type: ["number", "null"]
-          description: Final cumulative VWAP value at end of regular session
-        currentVsVwapPct:
-          type: ["number", "null"]
-          description: (latestPrice / intradayVwapLast - 1) * 100
+          description: Cumulative VWAP at end of regular session on vwapDate
         pctRegularMinutesAboveVwap:
           type: ["number", "null"]
           description: Percent of regular-session 1m bars where close > VWAP
-        pctAfterHoursAboveVwap:
-          type: ["number", "null"]
-          description: Percent of after-hours bars where close > regular-session VWAP
         fetchError:
           type: ["string", "null"]
           description: Error message if this symbol failed to fetch

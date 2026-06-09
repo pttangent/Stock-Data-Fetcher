@@ -15,7 +15,7 @@ function getETDateString(date: Date): string {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(date); // e.g. "2026-06-09"
+  }).format(date);
 }
 
 function getETMinutes(date: Date): number {
@@ -31,23 +31,24 @@ function getETMinutes(date: Date): number {
 }
 
 function formatET(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date) + " ET";
+  return (
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(date) + " ET"
+  );
 }
 
-// Regular session: 09:30 – 16:00 ET
-const MARKET_OPEN_MINS = 9 * 60 + 30;
-const MARKET_CLOSE_MINS = 16 * 60;
+const MARKET_OPEN_MINS = 9 * 60 + 30;   // 09:30 ET
+const MARKET_CLOSE_MINS = 16 * 60;       // 16:00 ET
 
-// ─── VWAP calculation ────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type Bar = {
   date: Date;
@@ -58,229 +59,209 @@ type Bar = {
   volume: number | null;
 };
 
-function computeSummary(bars: Bar[]) {
-  if (bars.length === 0) {
-    return {
-      intradayBarCount: 0,
-      regularBarCount: null,
-      latestPrice: null,
-      latestBarTimeEt: null,
-      isAfterHours: null,
-      isPremarket: null,
-      intradayVwapLast: null,
-      currentVsVwapPct: null,
-      pctRegularMinutesAboveVwap: null,
-      pctAfterHoursAboveVwap: null,
-    };
-  }
+type SessionType = "premarket" | "regular" | "afterhours";
 
-  const regularBars: Bar[] = [];
-  const afterHoursBars: Bar[] = [];
+function getBarSession(date: Date): SessionType {
+  const mins = getETMinutes(date);
+  if (mins < MARKET_OPEN_MINS) return "premarket";
+  if (mins > MARKET_CLOSE_MINS) return "afterhours";
+  return "regular";
+}
 
-  for (const bar of bars) {
-    const mins = getETMinutes(bar.date);
-    if (mins >= MARKET_OPEN_MINS && mins <= MARKET_CLOSE_MINS) {
-      regularBars.push(bar);
-    } else if (mins > MARKET_CLOSE_MINS) {
-      afterHoursBars.push(bar);
-    }
-  }
+// ─── VWAP on a set of bars (regular-session only) ────────────────────────────
 
-  // Cumulative VWAP over regular session
+function computeVwap(bars: Bar[]): {
+  intradayVwapLast: number | null;
+  pctRegularMinutesAboveVwap: number | null;
+  regularBarCount: number;
+} {
+  const regularBars = bars.filter((b) => getBarSession(b.date) === "regular");
+
   let cumPV = 0;
   let cumVol = 0;
   let lastVwap: number | null = null;
-  let aboveVwapCount = 0;
-  let validRegularCount = 0;
+  let aboveCount = 0;
+  let validCount = 0;
 
-  for (const bar of regularBars) {
-    const { high, low, close, volume } = bar;
+  for (const b of regularBars) {
+    const { high, low, close, volume } = b;
     if (high == null || low == null || close == null || volume == null || volume === 0) continue;
     const typical = (high + low + close) / 3;
     cumPV += typical * volume;
     cumVol += volume;
     if (cumVol > 0) {
       lastVwap = cumPV / cumVol;
-      if (close > lastVwap) aboveVwapCount++;
-      validRegularCount++;
+      if (close > lastVwap) aboveCount++;
+      validCount++;
     }
   }
-
-  const pctAboveVwap =
-    validRegularCount > 0 ? Math.round((aboveVwapCount / validRegularCount) * 10000) / 100 : null;
-
-  // After-hours bars vs VWAP
-  let ahAboveCount = 0;
-  let ahValidCount = 0;
-  if (lastVwap !== null) {
-    for (const bar of afterHoursBars) {
-      if (bar.close == null) continue;
-      ahValidCount++;
-      if (bar.close > lastVwap) ahAboveCount++;
-    }
-  }
-  const pctAfterHoursAboveVwap =
-    ahValidCount > 0 ? Math.round((ahAboveCount / ahValidCount) * 10000) / 100 : null;
-
-  // Latest bar
-  const latestBar = bars[bars.length - 1];
-  const latestMinutes = getETMinutes(latestBar.date);
-  const isAfterHours = latestMinutes > MARKET_CLOSE_MINS;
-  const isPremarket = latestMinutes < MARKET_OPEN_MINS;
-  const latestPrice = latestBar.close ?? null;
-
-  const currentVsVwapPct =
-    latestPrice != null && lastVwap != null
-      ? Math.round(((latestPrice / lastVwap - 1) * 100) * 100) / 100
-      : null;
 
   return {
-    intradayBarCount: bars.length,
-    regularBarCount: regularBars.length,
-    latestPrice,
-    latestBarTimeEt: formatET(latestBar.date),
-    isAfterHours,
-    isPremarket,
     intradayVwapLast: lastVwap != null ? Math.round(lastVwap * 10000) / 10000 : null,
-    currentVsVwapPct,
-    pctRegularMinutesAboveVwap: pctAboveVwap,
-    pctAfterHoursAboveVwap,
+    pctRegularMinutesAboveVwap:
+      validCount > 0 ? Math.round((aboveCount / validCount) * 10000) / 100 : null,
+    regularBarCount: regularBars.length,
   };
 }
 
 // ─── Per-symbol fetch ─────────────────────────────────────────────────────────
 
-async function fetchSymbolSummary(symbol: string, tradeDate: string) {
-  const base = { symbol: symbol.toUpperCase() };
+async function fetchSymbolSummary(symbol: string) {
+  const sym = symbol.toUpperCase();
 
   try {
-    // 1. Quote (price + after-hours + name)
+    // ── 1. Quote: name, price fields, prev close ──────────────────────────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const quote: Record<string, any> = await yf.quote(symbol);
+    const quote: Record<string, any> = await yf.quote(sym);
 
     const shortName = (quote.shortName as string | null) ?? null;
     const exchange = (quote.exchange as string | null) ?? null;
     const currency = (quote.currency as string | null) ?? null;
-    const regularMarketOpen = (quote.regularMarketOpen as number | null) ?? null;
-    const regularMarketDayHigh = (quote.regularMarketDayHigh as number | null) ?? null;
-    const regularMarketDayLow = (quote.regularMarketDayLow as number | null) ?? null;
-    const regularMarketPrice = (quote.regularMarketPrice as number | null) ?? null;
-    const regularMarketVolume = (quote.regularMarketVolume as number | null) ?? null;
-    const regularMarketChangePercent =
-      (quote.regularMarketChangePercent as number | null) ?? null;
-    const preMarketPrice = (quote.preMarketPrice as number | null) ?? null;
-    const postMarketPrice = (quote.postMarketPrice as number | null) ?? null;
 
-    // day return pct from open
-    const dayReturnPct =
-      regularMarketOpen && regularMarketPrice
-        ? Math.round(((regularMarketPrice / regularMarketOpen - 1) * 100) * 100) / 100
-        : regularMarketChangePercent != null
-          ? Math.round(regularMarketChangePercent * 100) / 100
-          : null;
+    // Regular-session OHLCV from quote
+    const dayOpen = (quote.regularMarketOpen as number | null) ?? null;
+    const dayHigh = (quote.regularMarketDayHigh as number | null) ?? null;
+    const dayLow = (quote.regularMarketDayLow as number | null) ?? null;
+    const dayClose = (quote.regularMarketPrice as number | null) ?? null;
+    const dayVolume = (quote.regularMarketVolume as number | null) ?? null;
 
-    // 2. 1m intraday bars for tradeDate (full day ET window)
-    // Yahoo Finance only retains ~2 trading days of 1m data.
-    // Use period1 = start of tradeDate (08:00 UTC ≈ 4 AM EDT, DST-safe) and period2 = now.
-    // Yahoo returns whatever it has from period1 onwards; the ET date filter below trims to the target day.
-    const dayStart = new Date(`${tradeDate}T08:00:00Z`);
-    const dayEnd = new Date(); // always "now" — forces Yahoo to return available data
+    // Previous close — used for real daily return calculation
+    const prevClose =
+      (quote.regularMarketPreviousClose as number | null) ??
+      (quote.previousClose as number | null) ??
+      null;
+
+    // Intraday change: close vs open (same day)
+    const intradayReturnPct =
+      dayOpen && dayClose
+        ? Math.round(((dayClose / dayOpen - 1) * 100) * 100) / 100
+        : null;
+
+    // vs previous close: the actual overnight + intraday return shown in markets
+    const vsPreClosePct =
+      prevClose && dayClose
+        ? Math.round(((dayClose / prevClose - 1) * 100) * 100) / 100
+        : null;
+
+    // ── 2. 1m intraday bars: fetch last 3 days, find most recent trading day ─
+    // Yahoo Finance keeps ~2 trading days of 1m data.
+    // period1 = 3 calendar days ago at 08:00 UTC (~4am EDT) to cover pre-market.
+    // period2 = now — forcing Yahoo to return the available window.
+    const period1 = new Date(Date.now() - 3 * 86_400_000);
+    period1.setUTCHours(8, 0, 0, 0);
+    const period2 = new Date();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let chartResult: any = null;
     try {
-      chartResult = await yf.chart(symbol, {
-        period1: dayStart,
-        period2: dayEnd,
+      chartResult = await yf.chart(sym, {
+        period1,
+        period2,
         interval: "1m",
       });
     } catch {
-      // chart may fail if no data; continue with quote data only
+      // silently continue — VWAP fields will be null
     }
 
     const rawQuotes: Array<Record<string, unknown>> = chartResult?.quotes ?? [];
-    const bars: Bar[] = rawQuotes
-      .map((q) => ({
-        date: q.date instanceof Date ? (q.date as Date) : new Date(String(q.date)),
-        open: (q.open as number | null) ?? null,
-        high: (q.high as number | null) ?? null,
-        low: (q.low as number | null) ?? null,
-        close: (q.close as number | null) ?? null,
-        volume: (q.volume as number | null) ?? null,
-      }))
-      .filter((b) => {
-        // Only keep bars that fall on the target ET date
-        return getETDateString(b.date) === tradeDate;
-      });
+    const allBars: Bar[] = rawQuotes.map((q) => ({
+      date: q.date instanceof Date ? (q.date as Date) : new Date(String(q.date)),
+      open: (q.open as number | null) ?? null,
+      high: (q.high as number | null) ?? null,
+      low: (q.low as number | null) ?? null,
+      close: (q.close as number | null) ?? null,
+      volume: (q.volume as number | null) ?? null,
+    }));
 
-    const vwap = computeSummary(bars);
-
-    // Best after-hours price: latest bar if after-hours, else postMarketPrice
-    let afterHoursPrice: number | null = null;
-    if (vwap.isAfterHours && vwap.latestPrice != null) {
-      afterHoursPrice = vwap.latestPrice;
-    } else if (postMarketPrice != null) {
-      afterHoursPrice = postMarketPrice;
+    // ── 3. Group bars by ET date ──────────────────────────────────────────
+    const barsByDate = new Map<string, Bar[]>();
+    for (const bar of allBars) {
+      const etDate = getETDateString(bar.date);
+      const arr = barsByDate.get(etDate) ?? [];
+      arr.push(bar);
+      barsByDate.set(etDate, arr);
     }
 
-    const afterHoursVsDayClosePct =
-      afterHoursPrice != null && regularMarketPrice != null
-        ? Math.round(((afterHoursPrice / regularMarketPrice - 1) * 100) * 100) / 100
+    // ── 4. Find most recent ET date that has regular-session bars (VWAP day) ─
+    const sortedDates = Array.from(barsByDate.keys()).sort().reverse(); // newest first
+    let vwapDate: string | null = null;
+    let vwapBars: Bar[] = [];
+
+    for (const date of sortedDates) {
+      const dateBars = barsByDate.get(date) ?? [];
+      const hasRegular = dateBars.some((b) => getBarSession(b.date) === "regular");
+      if (hasRegular) {
+        vwapDate = date;
+        vwapBars = dateBars;
+        break;
+      }
+    }
+
+    // ── 5. Compute VWAP from that day's bars ─────────────────────────────
+    const { intradayVwapLast, pctRegularMinutesAboveVwap, regularBarCount } =
+      computeVwap(vwapBars);
+
+    // ── 6. Latest bar across ALL fetched bars ────────────────────────────
+    const latestBar = allBars.length > 0 ? allBars[allBars.length - 1] : null;
+    const latestPrice = latestBar?.close ?? null;
+    const latestBarTimeEt = latestBar ? formatET(latestBar.date) : null;
+    const latestSession: SessionType | null = latestBar
+      ? getBarSession(latestBar.date)
+      : null;
+
+    // Latest price vs previous close
+    const latestChgPct =
+      latestPrice != null && prevClose
+        ? Math.round(((latestPrice / prevClose - 1) * 100) * 100) / 100
         : null;
 
     return {
-      ...base,
+      symbol: sym,
       shortName,
       exchange,
       currency,
-      dayOpen: regularMarketOpen,
-      dayHigh: regularMarketDayHigh,
-      dayLow: regularMarketDayLow,
-      dayClose: regularMarketPrice,
-      dayVolume: regularMarketVolume,
-      dayReturnPct,
-      latestPrice: vwap.latestPrice,
-      latestBarTimeEt: vwap.latestBarTimeEt,
-      isAfterHours: vwap.isAfterHours,
-      isPremarket: vwap.isPremarket,
-      postMarketPrice,
-      preMarketPrice,
-      afterHoursPrice,
-      afterHoursVsDayClosePct,
-      regularBarCount: vwap.regularBarCount,
-      intradayBarCount: vwap.intradayBarCount,
-      intradayVwapLast: vwap.intradayVwapLast,
-      currentVsVwapPct: vwap.currentVsVwapPct,
-      pctRegularMinutesAboveVwap: vwap.pctRegularMinutesAboveVwap,
-      pctAfterHoursAboveVwap: vwap.pctAfterHoursAboveVwap,
+      prevClose,
+      dayOpen,
+      dayHigh,
+      dayLow,
+      dayClose,
+      dayVolume,
+      intradayReturnPct,
+      vsPreClosePct,
+      latestPrice,
+      latestSession,
+      latestChgPct,
+      latestBarTimeEt,
+      vwapDate,
+      regularBarCount,
+      intradayBarCount: allBars.length,
+      intradayVwapLast,
+      pctRegularMinutesAboveVwap,
       fetchError: null,
     };
   } catch (err) {
     return {
-      ...base,
+      symbol: sym,
       shortName: null,
       exchange: null,
       currency: null,
+      prevClose: null,
       dayOpen: null,
       dayHigh: null,
       dayLow: null,
       dayClose: null,
       dayVolume: null,
-      dayReturnPct: null,
+      intradayReturnPct: null,
+      vsPreClosePct: null,
       latestPrice: null,
+      latestSession: null,
+      latestChgPct: null,
       latestBarTimeEt: null,
-      isAfterHours: null,
-      isPremarket: null,
-      postMarketPrice: null,
-      preMarketPrice: null,
-      afterHoursPrice: null,
-      afterHoursVsDayClosePct: null,
+      vwapDate: null,
       regularBarCount: null,
       intradayBarCount: null,
       intradayVwapLast: null,
-      currentVsVwapPct: null,
       pctRegularMinutesAboveVwap: null,
-      pctAfterHoursAboveVwap: null,
       fetchError: err instanceof Error ? err.message : "Unknown error",
     };
   }
@@ -291,7 +272,6 @@ async function fetchSymbolSummary(symbol: string, tradeDate: string) {
 router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
   const symbols = body.symbols;
-  const date = body.date as string | null | undefined;
 
   if (
     !Array.isArray(symbols) ||
@@ -299,20 +279,25 @@ router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
     symbols.length > 100 ||
     symbols.some((s) => typeof s !== "string" || s.trim() === "")
   ) {
-    res.status(400).json({ error: "symbols must be a non-empty array of up to 100 ticker strings" });
+    res
+      .status(400)
+      .json({ error: "symbols must be a non-empty array of up to 100 ticker strings" });
     return;
   }
 
-  // Determine trade date in ET
-  const tradeDate = date ?? getETDateString(new Date());
+  const tradeDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 
   req.log.info({ symbols, tradeDate }, "batch-summary request");
 
   try {
-    // Fetch symbols sequentially to avoid rate-limiting
     const results = [];
     for (const symbol of symbols) {
-      const item = await fetchSymbolSummary(symbol.trim().toUpperCase(), tradeDate);
+      const item = await fetchSymbolSummary(symbol.trim());
       results.push(item);
     }
 
@@ -323,7 +308,8 @@ router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
     });
   } catch (err) {
     req.log.error({ err }, "batch-summary error");
-    const message = err instanceof Error ? err.message : "Failed to fetch batch summary";
+    const message =
+      err instanceof Error ? err.message : "Failed to fetch batch summary";
     res.status(500).json({ error: message });
   }
 });
