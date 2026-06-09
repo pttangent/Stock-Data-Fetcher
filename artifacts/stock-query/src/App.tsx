@@ -9,6 +9,12 @@ const queryClient = new QueryClient();
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState<"stock" | "symbols">("stock");
+  const [pendingSymbolQuery, setPendingSymbolQuery] = useState<string | null>(null);
+
+  const handleSymbolClick = (sym: string) => {
+    setPendingSymbolQuery(sym);
+    setActiveTab("stock");
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground font-mono flex flex-col">
@@ -16,8 +22,8 @@ function AppContent() {
         <button
           onClick={() => setActiveTab("stock")}
           className={`flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
-            activeTab === "stock" 
-              ? "border-primary text-primary bg-muted/10" 
+            activeTab === "stock"
+              ? "border-primary text-primary bg-muted/10"
               : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
           }`}
         >
@@ -27,8 +33,8 @@ function AppContent() {
         <button
           onClick={() => setActiveTab("symbols")}
           className={`flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
-            activeTab === "symbols" 
-              ? "border-primary text-primary bg-muted/10" 
+            activeTab === "symbols"
+              ? "border-primary text-primary bg-muted/10"
               : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
           }`}
         >
@@ -36,7 +42,14 @@ function AppContent() {
         </button>
       </nav>
       <div className="flex-1">
-        {activeTab === "stock" ? <Home /> : <Symbols />}
+        {activeTab === "stock" ? (
+          <Home
+            pendingSymbolQuery={pendingSymbolQuery}
+            onPendingQueryHandled={() => setPendingSymbolQuery(null)}
+          />
+        ) : (
+          <Symbols onSymbolClick={handleSymbolClick} />
+        )}
       </div>
     </div>
   );

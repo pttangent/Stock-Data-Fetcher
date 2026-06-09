@@ -96,9 +96,11 @@ const sessionBadge = (s: string | null | undefined) => {
 function CategoryTable({
   category,
   rows,
+  onSymbolClick,
 }: {
   category: string;
   rows: SymbolSummaryItem[];
+  onSymbolClick: (sym: string) => void;
 }) {
   const [sort, setSort] = useState<SortConfig>({ key: "vsPreClosePct", direction: "desc" });
 
@@ -155,7 +157,12 @@ function CategoryTable({
         <Table className="font-mono text-xs whitespace-nowrap">
           <TableHeader className="bg-muted/10">
             <TableRow className="border-border hover:bg-transparent">
-              <Th col="symbol">Symbol</Th>
+              <TableHead
+                className="py-2 px-2 cursor-pointer hover:text-foreground select-none whitespace-nowrap sticky left-0 z-20 bg-card border-r border-border shadow-[2px_0_4px_rgba(0,0,0,0.4)]"
+                onClick={() => handleSort("symbol")}
+              >
+                Symbol<SortIcon col="symbol" />
+              </TableHead>
               <Th col="shortName">Name</Th>
               <Th col="prevClose" right>Prev</Th>
               <Th col="dayOpen" right>Open</Th>
@@ -175,11 +182,19 @@ function CategoryTable({
           </TableHeader>
           <TableBody>
             {sorted.map((row, i) => (
-              <TableRow key={row.symbol || i} className="border-border hover:bg-muted/10">
-                <TableCell className="px-2 font-bold">
-                  {row.fetchError
-                    ? <span className="text-destructive" title={row.fetchError}>{row.symbol} ⚠</span>
-                    : row.symbol}
+              <TableRow key={row.symbol || i} className="border-border hover:bg-muted/10 group">
+                <TableCell className="px-2 font-bold sticky left-0 z-10 bg-card group-hover:bg-muted/10 border-r border-border shadow-[2px_0_4px_rgba(0,0,0,0.4)] transition-colors">
+                  {row.fetchError ? (
+                    <span className="text-destructive" title={row.fetchError}>{row.symbol} ⚠</span>
+                  ) : (
+                    <button
+                      onClick={() => onSymbolClick(row.symbol)}
+                      className="font-bold hover:text-primary hover:underline cursor-pointer underline-offset-2 transition-colors"
+                      title={`個股查詢: ${row.symbol} 1min intraday`}
+                    >
+                      {row.symbol}
+                    </button>
+                  )}
                 </TableCell>
                 <TableCell className="px-2 max-w-[100px] truncate text-muted-foreground" title={row.shortName ?? ""}>{row.shortName ?? "—"}</TableCell>
                 <TableCell className="px-2 text-right text-muted-foreground">{fmt(row.prevClose)}</TableCell>
@@ -232,7 +247,7 @@ const DEFAULT_INPUT = `CATEGORY_SYMBOLS = {
     ],
 }`;
 
-export default function Symbols() {
+export default function Symbols({ onSymbolClick }: { onSymbolClick: (sym: string) => void }) {
   const [inputText, setInputText] = useState(DEFAULT_INPUT);
   const [copyStatus, setCopyStatus] = useState<"idle" | "success" | "error">("idle");
   const [parseError, setParseError] = useState<string | null>(null);
@@ -299,7 +314,7 @@ export default function Symbols() {
 
   return (
     <div className="bg-background text-foreground font-mono p-4 md:p-8">
-      <div className="max-w-[1800px] mx-auto space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
 
         <header className="border-b border-border pb-4 flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
@@ -415,7 +430,7 @@ export default function Symbols() {
             {!isPending && data && parsedCategories && Object.entries(parsedCategories).map(([cat, syms]) => {
               const rows = syms.map((s) => resultMap[s]).filter(Boolean) as SymbolSummaryItem[];
               return (
-                <CategoryTable key={cat} category={cat} rows={rows} />
+                <CategoryTable key={cat} category={cat} rows={rows} onSymbolClick={onSymbolClick} />
               );
             })}
           </div>

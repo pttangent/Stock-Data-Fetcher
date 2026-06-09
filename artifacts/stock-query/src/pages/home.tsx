@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { getStockHistory, useGetStockInfo, StockHistoryResult, GetStockHistoryParams } from "@workspace/api-client-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,12 @@ import CandlestickChart from "@/components/CandlestickChart";
 type Period = "1d" | "max";
 type Interval = "1m" | "5m" | "15m" | "1h" | "1d";
 
-export default function Home() {
+type HomeProps = {
+  pendingSymbolQuery?: string | null;
+  onPendingQueryHandled?: () => void;
+};
+
+export default function Home({ pendingSymbolQuery, onPendingQueryHandled }: HomeProps = {}) {
   const [symbol, setSymbol] = useState("AAPL");
   const [period, setPeriod] = useState<Period>("1d");
   const [interval, setInterval] = useState<Interval>("1m");
@@ -51,17 +56,21 @@ export default function Home() {
     }
   }, []);
 
-  const runQueries = async (queries: Omit<GetStockHistoryParams, "symbol">[]) => {
-    if (!symbol) return;
-    
+  const runQueries = async (
+    queries: Omit<GetStockHistoryParams, "symbol">[],
+    symbolOverride?: string
+  ) => {
+    const sym = symbolOverride ?? symbol;
+    if (!sym) return;
+
     setIsFetching(true);
     setErrorMsg(null);
     try {
-      const promises = queries.map(q => getStockHistory({ symbol, ...q }));
+      const promises = queries.map(q => getStockHistory({ symbol: sym, ...q }));
       const res = await Promise.all(promises);
       setResults(res);
       setActiveResultIdx(0);
-      await copyToClipboard(res, symbol);
+      await copyToClipboard(res, sym);
     } catch (err: any) {
       console.error("Query failed", err);
       setErrorMsg(err.message || "Query failed");
@@ -69,6 +78,17 @@ export default function Home() {
       setIsFetching(false);
     }
   };
+
+  // Auto-query when navigated from Symbols tab via symbol click
+  useEffect(() => {
+    if (!pendingSymbolQuery) return;
+    setSymbol(pendingSymbolQuery);
+    setPeriod("1d");
+    setInterval("1m");
+    runQueries([{ period: "1d", interval: "1m" }], pendingSymbolQuery);
+    onPendingQueryHandled?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSymbolQuery]);
 
   const handleManualQuery = () => {
     runQueries([{ period, interval }]);
