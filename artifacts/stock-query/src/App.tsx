@@ -1,18 +1,44 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
+import Symbols from "@/pages/symbols";
 
 const queryClient = new QueryClient();
 
-function Router() {
+function AppContent() {
+  const [activeTab, setActiveTab] = useState<"stock" | "symbols">("stock");
+
   return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route component={NotFound} />
-    </Switch>
+    <div className="min-h-screen bg-background text-foreground font-mono flex flex-col">
+      <nav className="border-b border-border flex shrink-0">
+        <button
+          onClick={() => setActiveTab("stock")}
+          className={`flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
+            activeTab === "stock" 
+              ? "border-primary text-primary bg-muted/10" 
+              : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
+          }`}
+        >
+          個股查詢 / STOCK
+        </button>
+        <div className="w-px bg-border"></div>
+        <button
+          onClick={() => setActiveTab("symbols")}
+          className={`flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
+            activeTab === "symbols" 
+              ? "border-primary text-primary bg-muted/10" 
+              : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
+          }`}
+        >
+          清單查詢 / SYMBOLS
+        </button>
+      </nav>
+      <div className="flex-1">
+        {activeTab === "stock" ? <Home /> : <Symbols />}
+      </div>
+    </div>
   );
 }
 
@@ -20,9 +46,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
+        <AppContent />
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

@@ -66,3 +66,50 @@ export const GetStockInfoResponse = zod.object({
 })
 
 
+/**
+ * For each symbol, fetches today's 1m intraday bars (including pre/post market), computes regular-session VWAP, % of minutes above VWAP, latest price, after-hours price, and daily OHLCV. Uses US/Eastern timezone for session logic.
+
+ * @summary Batch today summary for a list of symbols
+ */
+export const batchStockSummaryBodySymbolsMax = 100;
+
+
+
+export const BatchStockSummaryBody = zod.object({
+  "symbols": zod.array(zod.string()).min(1).max(batchStockSummaryBodySymbolsMax).describe('List of ticker symbols to query'),
+  "date": zod.string().nullish().describe('Trade date YYYY-MM-DD (ET). Defaults to today in US\/Eastern.')
+})
+
+export const BatchStockSummaryResponse = zod.object({
+  "results": zod.array(zod.object({
+  "symbol": zod.string(),
+  "shortName": zod.string().nullish(),
+  "exchange": zod.string().nullish(),
+  "currency": zod.string().nullish(),
+  "dayOpen": zod.number().nullish(),
+  "dayHigh": zod.number().nullish(),
+  "dayLow": zod.number().nullish(),
+  "dayClose": zod.number().nullish(),
+  "dayVolume": zod.number().nullish(),
+  "dayReturnPct": zod.number().nullish().describe('(close\/open - 1) \* 100'),
+  "latestPrice": zod.number().nullish().describe('Most recent price (may be after-hours)'),
+  "latestBarTimeEt": zod.string().nullish().describe('Timestamp of the latest 1m bar in ET'),
+  "isAfterHours": zod.boolean().nullish().describe('True if the latest bar is after regular session close'),
+  "isPremarket": zod.boolean().nullish().describe('True if the latest bar is before regular session open'),
+  "postMarketPrice": zod.number().nullish().describe('After-hours price from Yahoo quote fields'),
+  "preMarketPrice": zod.number().nullish().describe('Pre-market price from Yahoo quote fields'),
+  "afterHoursPrice": zod.number().nullish().describe('Best available after-hours price (1m bar or quote fallback)'),
+  "afterHoursVsDayClosePct": zod.number().nullish().describe('(afterHoursPrice \/ dayClose - 1) \* 100'),
+  "regularBarCount": zod.number().nullish().describe('Number of 1m bars in regular session (09:30-16:00 ET)'),
+  "intradayBarCount": zod.number().nullish().describe('Total 1m bars including pre\/post market'),
+  "intradayVwapLast": zod.number().nullish().describe('Final cumulative VWAP value at end of regular session'),
+  "currentVsVwapPct": zod.number().nullish().describe('(latestPrice \/ intradayVwapLast - 1) \* 100'),
+  "pctRegularMinutesAboveVwap": zod.number().nullish().describe('Percent of regular-session 1m bars where close > VWAP'),
+  "pctAfterHoursAboveVwap": zod.number().nullish().describe('Percent of after-hours bars where close > regular-session VWAP'),
+  "fetchError": zod.string().nullish().describe('Error message if this symbol failed to fetch')
+})),
+  "tradeDate": zod.string().describe('The trade date used for this query (ET)'),
+  "fetchedAt": zod.string().describe('ISO timestamp when the batch completed')
+})
+
+

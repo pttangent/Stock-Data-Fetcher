@@ -1,0 +1,562 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Today ticker summary table.
+
+功能：
+1. 接收任意股票代碼 list
+2. 抓取今日 OHLCV
+3. 抓取 1m intraday bars，包含 pre-market / after-hours
+4. 計算日內 VWAP
+5. 計算 close > VWAP 的分鐘比例
+6. 抓取最新價格 / 盤後價格
+7. 抓取公司名稱、sector、industry、公司簡介
+8. 輸出 CSV + JSON
+
+Install:
+    pip install yfinance pandas numpy pytz
+
+Examples:
+    python scripts/today_ticker_summary.py --tickers AMD,NVDA,SMR,OKLO,CCJ,URA
+
+    python scripts/today_ticker_summary.py --tickers-file tickers.txt
+
+    python scripts/today_ticker_summary.py --tickers AMD,NVDA,SMR --date 2026-06-09
+
+Outputs:
+    artifacts/today_summary/today_ticker_summary.csv
+    artifacts/today_summary/today_ticker_summary.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+import pytz
+import yfinance as yf
+
+
+US_EASTERN = pytz.timezone("America/New_York")
+OUTPUT_DIR = Path("artifacts/today_summary")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def safe_float(x: Any) -> Optional[float]:
+    try:
+        if x is None:
+            return None
+        if isinstance(x, float) and math.isnan(x):
+            return None
+        return float(x)
+    except Exception:
+        return None
+
+
+def safe_int(x: Any) -> Optional[int]:
+    try:
+        if x is None:
+            return None
+        if isinstance(x, float) and math.isnan(x):
+            return None
+        return int(x)
+    except Exception:
+        return None
+
+
+def today_et_date() -> str:
+    return pd.Timestamp.now(tz=US_EASTERN).strftime("%Y-%m-%d")
+
+
+def parse_tickers(raw: Optional[str], file_path: Optional[str]) -> List[str]:
+    tickers: List[str] = []
+
+    if raw:
+        tickers.extend([x.strip().upper() for x in raw.split(",") if x.strip()])
+
+    if file_path:
+        p = Path(file_path)
+        if not p.exists():
+            raise FileNotFoundError(f"tickers file not found: {file_path}")
+
+        text = p.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            # 支援 csv 一行多個，也支援一行一個
+            parts = [x.strip().upper() for x in line.split(",") if x.strip()]
+            tickers.extend(parts)
+
+    # 去重但保留順序
+    seen = set()
+    out = []
+    for t in tickers:
+        if t not in seen:
+            out.append(t)
+            seen.add(t)
+
+    if not out:
+        raise ValueError("No tickers provided. Use --tickers AMD,NVDA or --tickers-file tickers.txt")
+
+    return out
+
+
+def flatten_yf_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0] for c in df.columns]
+    return df
+
+
+def normalize_intraday_index(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC").tz_convert(US_EASTERN)
+    else:
+        df.index = df.index.tz_convert(US_EASTERN)
+
+    return df
+
+
+def fetch_profile(ticker: str) -> Dict[str, Any]:
+    """
+    公司介紹 / 公司基本資訊。
+    Yahoo 有時會 rate limit，因此全部做 fallback。
+    """
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.get_info()
+    except Exception:
+        info = {}
+
+    summary = info.get("longBusinessSummary")
+    if isinstance(summary, str):
+        summary_short = summary[:500].replace("\n", " ").strip()
+    else:
+        summary_short = None
+
+    return {
+        "company_name": info.get("longName") or info.get("shortName"),
+        "quote_type": info.get("quoteType"),
+        "sector": info.get("sector"),
+        "industry": info.get("industry"),
+        "exchange": info.get("exchange"),
+        "currency": info.get("currency"),
+        "market_cap": safe_int(info.get("marketCap")),
+        "website": info.get("website"),
+        "business_summary": summary_short,
+    }
+
+
+def fetch_daily_ohlcv(ticker: str, trade_date: str) -> Dict[str, Any]:
+    """
+    抓取指定日期的日線 OHLCV。
+    如果今天尚未結束，Yahoo 可能返回臨時日線。
+    """
+    start = pd.Timestamp(trade_date) - pd.Timedelta(days=7)
+    end = pd.Timestamp(trade_date) + pd.Timedelta(days=2)
+
+    try:
+        df = yf.download(
+            ticker,
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d"),
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
+    except Exception:
+        df = pd.DataFrame()
+
+    df = flatten_yf_columns(df)
+
+    if df.empty:
+        return {
+            "day_open": None,
+            "day_high": None,
+            "day_low": None,
+            "day_close": None,
+            "day_adj_close": None,
+            "day_volume": None,
+            "day_return_pct": None,
+        }
+
+    target_date = pd.Timestamp(trade_date).date()
+    df = df.copy()
+    df["date"] = df.index.date
+    hit = df[df["date"] == target_date]
+
+    if hit.empty:
+        return {
+            "day_open": None,
+            "day_high": None,
+            "day_low": None,
+            "day_close": None,
+            "day_adj_close": None,
+            "day_volume": None,
+            "day_return_pct": None,
+        }
+
+    row = hit.iloc[-1]
+
+    o = safe_float(row.get("Open"))
+    c = safe_float(row.get("Close"))
+
+    return {
+        "day_open": o,
+        "day_high": safe_float(row.get("High")),
+        "day_low": safe_float(row.get("Low")),
+        "day_close": c,
+        "day_adj_close": safe_float(row.get("Adj Close")),
+        "day_volume": safe_int(row.get("Volume")),
+        "day_return_pct": round((c / o - 1) * 100, 2) if o and c else None,
+    }
+
+
+def fetch_intraday_1m(ticker: str, trade_date: str) -> pd.DataFrame:
+    """
+    抓取 1m intraday，包含盤前/盤後。
+
+    yfinance 限制：
+    - 1m 通常只保留近期資料
+    - prepost=True 可嘗試抓盤前盤後
+    """
+    start = pd.Timestamp(trade_date)
+    end = start + pd.Timedelta(days=1)
+
+    try:
+        df = yf.download(
+            ticker,
+            start=start.strftime("%Y-%m-%d"),
+            end=end.strftime("%Y-%m-%d"),
+            interval="1m",
+            prepost=True,
+            auto_adjust=False,
+            progress=False,
+            threads=False,
+        )
+    except Exception:
+        return pd.DataFrame()
+
+    df = flatten_yf_columns(df)
+
+    if df.empty:
+        return df
+
+    df = normalize_intraday_index(df)
+
+    # 只保留指定日期 ET
+    target_date = pd.Timestamp(trade_date).date()
+    df = df[df.index.date == target_date].copy()
+
+    if df.empty:
+        return df
+
+    return df
+
+
+def add_vwap_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    計算 regular session cumulative VWAP。
+    VWAP 用 typical price 更合理：
+        typical = (High + Low + Close) / 3
+    """
+    if df.empty:
+        return df
+
+    out = df.copy()
+
+    out["is_regular"] = (
+        (out.index.time >= pd.Timestamp("09:30").time())
+        & (out.index.time <= pd.Timestamp("16:00").time())
+    )
+
+    regular = out[out["is_regular"]].copy()
+
+    if regular.empty:
+        out["typical_price"] = np.nan
+        out["cum_vwap"] = np.nan
+        out["above_vwap"] = np.nan
+        return out
+
+    regular["typical_price"] = (
+        regular["High"] + regular["Low"] + regular["Close"]
+    ) / 3
+
+    pv = regular["typical_price"] * regular["Volume"]
+    cum_pv = pv.cumsum()
+    cum_vol = regular["Volume"].replace(0, np.nan).cumsum()
+
+    regular["cum_vwap"] = cum_pv / cum_vol
+    regular["above_vwap"] = regular["Close"] > regular["cum_vwap"]
+
+    out["typical_price"] = np.nan
+    out["cum_vwap"] = np.nan
+    out["above_vwap"] = np.nan
+
+    out.loc[regular.index, "typical_price"] = regular["typical_price"]
+    out.loc[regular.index, "cum_vwap"] = regular["cum_vwap"]
+    out.loc[regular.index, "above_vwap"] = regular["above_vwap"]
+
+    return out
+
+
+def summarize_intraday(df: pd.DataFrame) -> Dict[str, Any]:
+    if df.empty:
+        return {
+            "intraday_bar_count": 0,
+            "regular_bar_count": 0,
+            "latest_bar_time_et": None,
+            "latest_price": None,
+            "latest_volume": None,
+            "is_after_hours_latest": None,
+            "regular_close_time_et": None,
+            "regular_close": None,
+            "intraday_vwap_last": None,
+            "current_vs_vwap_pct": None,
+            "pct_regular_minutes_above_vwap": None,
+            "pct_after_hours_minutes_above_regular_vwap": None,
+        }
+
+    df = add_vwap_columns(df)
+
+    latest_idx = df.index[-1]
+    latest_row = df.iloc[-1]
+
+    is_after_hours = latest_idx.time() > pd.Timestamp("16:00").time()
+    is_premarket = latest_idx.time() < pd.Timestamp("09:30").time()
+
+    regular = df[df["is_regular"]].copy()
+    after_hours = df[df.index.time > pd.Timestamp("16:00").time()].copy()
+
+    if regular.empty:
+        regular_close_time = None
+        regular_close = None
+        last_vwap = None
+        pct_above_regular = None
+    else:
+        regular_close_time = regular.index[-1].strftime("%Y-%m-%d %H:%M:%S %Z")
+        regular_close = safe_float(regular.iloc[-1].get("Close"))
+        last_vwap = safe_float(regular.iloc[-1].get("cum_vwap"))
+
+        valid = regular.dropna(subset=["above_vwap"])
+        pct_above_regular = (
+            round(float(valid["above_vwap"].mean() * 100), 2)
+            if not valid.empty
+            else None
+        )
+
+    latest_price = safe_float(latest_row.get("Close"))
+
+    current_vs_vwap_pct = (
+        round((latest_price / last_vwap - 1) * 100, 2)
+        if latest_price and last_vwap
+        else None
+    )
+
+    # after-hours 價格如果高於 regular VWAP，也可以計算比例
+    if after_hours.empty or last_vwap is None:
+        pct_after_hours_above_vwap = None
+    else:
+        pct_after_hours_above_vwap = round(
+            float((after_hours["Close"] > last_vwap).mean() * 100), 2
+        )
+
+    return {
+        "intraday_bar_count": int(len(df)),
+        "regular_bar_count": int(len(regular)),
+        "latest_bar_time_et": latest_idx.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "latest_price": latest_price,
+        "latest_volume": safe_int(latest_row.get("Volume")),
+        "is_after_hours_latest": bool(is_after_hours),
+        "is_premarket_latest": bool(is_premarket),
+        "regular_close_time_et": regular_close_time,
+        "regular_close": regular_close,
+        "intraday_vwap_last": last_vwap,
+        "current_vs_vwap_pct": current_vs_vwap_pct,
+        "pct_regular_minutes_above_vwap": pct_above_regular,
+        "pct_after_hours_minutes_above_regular_vwap": pct_after_hours_above_vwap,
+    }
+
+
+def get_yahoo_quote_fallback(ticker: str) -> Dict[str, Any]:
+    """
+    Yahoo info 裡有時會提供：
+    - currentPrice
+    - regularMarketPrice
+    - postMarketPrice
+    - preMarketPrice
+
+    這些欄位不是每個 ticker 都有。
+    """
+    try:
+        info = yf.Ticker(ticker).get_info()
+    except Exception:
+        info = {}
+
+    return {
+        "yahoo_current_price": safe_float(info.get("currentPrice")),
+        "yahoo_regular_market_price": safe_float(info.get("regularMarketPrice")),
+        "yahoo_pre_market_price": safe_float(info.get("preMarketPrice")),
+        "yahoo_post_market_price": safe_float(info.get("postMarketPrice")),
+        "yahoo_post_market_change_pct": safe_float(info.get("postMarketChangePercent")),
+        "yahoo_regular_market_change_pct": safe_float(info.get("regularMarketChangePercent")),
+    }
+
+
+def build_today_summary(tickers: List[str], trade_date: str) -> pd.DataFrame:
+    records: List[Dict[str, Any]] = []
+
+    for i, ticker in enumerate(tickers, start=1):
+        print(f"[{i}/{len(tickers)}] Fetching {ticker}...")
+
+        profile = fetch_profile(ticker)
+        time.sleep(0.2)
+
+        daily = fetch_daily_ohlcv(ticker, trade_date)
+        time.sleep(0.2)
+
+        intraday_df = fetch_intraday_1m(ticker, trade_date)
+        intraday = summarize_intraday(intraday_df)
+        time.sleep(0.2)
+
+        quote_fallback = get_yahoo_quote_fallback(ticker)
+        time.sleep(0.2)
+
+        # 優先使用 1m prepost 最新價；如果沒有，再 fallback 到 Yahoo quote fields
+        latest_price = intraday.get("latest_price")
+        after_hours_price = None
+
+        if intraday.get("is_after_hours_latest") and latest_price is not None:
+            after_hours_price = latest_price
+        elif quote_fallback.get("yahoo_post_market_price") is not None:
+            after_hours_price = quote_fallback.get("yahoo_post_market_price")
+
+        record = {
+            "ticker": ticker,
+            **profile,
+            **daily,
+            **intraday,
+            **quote_fallback,
+            "after_hours_price": after_hours_price,
+        }
+
+        # 最新價相對日收盤
+        day_close = record.get("day_close")
+        if latest_price and day_close:
+            record["latest_vs_day_close_pct"] = round((latest_price / day_close - 1) * 100, 2)
+        else:
+            record["latest_vs_day_close_pct"] = None
+
+        if after_hours_price and day_close:
+            record["after_hours_vs_day_close_pct"] = round((after_hours_price / day_close - 1) * 100, 2)
+        else:
+            record["after_hours_vs_day_close_pct"] = None
+
+        records.append(record)
+
+    df = pd.DataFrame(records)
+
+    # 優先顯示有最新價與成交量的
+    sort_cols = []
+    if "day_return_pct" in df.columns:
+        sort_cols.append("day_return_pct")
+    if sort_cols:
+        df = df.sort_values(sort_cols, ascending=False, na_position="last")
+
+    return df
+
+
+def save_outputs(df: pd.DataFrame, trade_date: str) -> None:
+    csv_path = OUTPUT_DIR / f"{trade_date}_today_ticker_summary.csv"
+    json_path = OUTPUT_DIR / f"{trade_date}_today_ticker_summary.json"
+
+    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+
+    records = df.replace({np.nan: None}).to_dict(orient="records")
+    with json_path.open("w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+
+    print("\nDone.")
+    print(f"CSV : {csv_path}")
+    print(f"JSON: {json_path}")
+
+
+def print_preview(df: pd.DataFrame) -> None:
+    cols = [
+        "ticker",
+        "company_name",
+        "sector",
+        "industry",
+        "day_open",
+        "day_high",
+        "day_low",
+        "day_close",
+        "day_volume",
+        "day_return_pct",
+        "latest_price",
+        "after_hours_price",
+        "latest_vs_day_close_pct",
+        "after_hours_vs_day_close_pct",
+        "intraday_vwap_last",
+        "current_vs_vwap_pct",
+        "pct_regular_minutes_above_vwap",
+        "is_after_hours_latest",
+        "latest_bar_time_et",
+    ]
+
+    cols = [c for c in cols if c in df.columns]
+
+    print("\nPreview:")
+    print(df[cols].to_string(index=False))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--tickers",
+        type=str,
+        default=None,
+        help="Comma-separated ticker list, e.g. AMD,NVDA,SMR,OKLO,CCJ",
+    )
+    parser.add_argument(
+        "--tickers-file",
+        type=str,
+        default=None,
+        help="Path to txt/csv file. One ticker per line or comma-separated.",
+    )
+    parser.add_argument(
+        "--date",
+        type=str,
+        default=today_et_date(),
+        help="Trade date in YYYY-MM-DD, default=today in US/Eastern.",
+    )
+
+    args = parser.parse_args()
+
+    tickers = parse_tickers(args.tickers, args.tickers_file)
+    trade_date = args.date
+
+    print(f"Trade date: {trade_date}")
+    print(f"Tickers: {', '.join(tickers)}")
+
+    df = build_today_summary(tickers, trade_date)
+    save_outputs(df, trade_date)
+    print_preview(df)
+
+
+if __name__ == "__main__":
+    main()

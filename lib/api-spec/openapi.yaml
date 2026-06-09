@@ -104,6 +104,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /stocks/batch-summary:
+    post:
+      operationId: batchStockSummary
+      tags: [stocks]
+      summary: Batch today summary for a list of symbols
+      description: >
+        For each symbol, fetches today's 1m intraday bars (including pre/post market),
+        computes regular-session VWAP, % of minutes above VWAP, latest price,
+        after-hours price, and daily OHLCV. Uses US/Eastern timezone for session logic.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchSummaryRequest"
+      responses:
+        "200":
+          description: Batch summary results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchSummaryResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -181,6 +215,109 @@ components:
           type: ["number", "null"]
       required:
         - symbol
+    BatchSummaryRequest:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 100
+          description: List of ticker symbols to query
+        date:
+          type: ["string", "null"]
+          description: Trade date YYYY-MM-DD (ET). Defaults to today in US/Eastern.
+      required:
+        - symbols
+    SymbolSummaryItem:
+      type: object
+      properties:
+        symbol:
+          type: string
+        shortName:
+          type: ["string", "null"]
+        exchange:
+          type: ["string", "null"]
+        currency:
+          type: ["string", "null"]
+        dayOpen:
+          type: ["number", "null"]
+        dayHigh:
+          type: ["number", "null"]
+        dayLow:
+          type: ["number", "null"]
+        dayClose:
+          type: ["number", "null"]
+        dayVolume:
+          type: ["integer", "null"]
+        dayReturnPct:
+          type: ["number", "null"]
+          description: (close/open - 1) * 100
+        latestPrice:
+          type: ["number", "null"]
+          description: Most recent price (may be after-hours)
+        latestBarTimeEt:
+          type: ["string", "null"]
+          description: Timestamp of the latest 1m bar in ET
+        isAfterHours:
+          type: ["boolean", "null"]
+          description: True if the latest bar is after regular session close
+        isPremarket:
+          type: ["boolean", "null"]
+          description: True if the latest bar is before regular session open
+        postMarketPrice:
+          type: ["number", "null"]
+          description: After-hours price from Yahoo quote fields
+        preMarketPrice:
+          type: ["number", "null"]
+          description: Pre-market price from Yahoo quote fields
+        afterHoursPrice:
+          type: ["number", "null"]
+          description: Best available after-hours price (1m bar or quote fallback)
+        afterHoursVsDayClosePct:
+          type: ["number", "null"]
+          description: (afterHoursPrice / dayClose - 1) * 100
+        regularBarCount:
+          type: ["integer", "null"]
+          description: Number of 1m bars in regular session (09:30-16:00 ET)
+        intradayBarCount:
+          type: ["integer", "null"]
+          description: Total 1m bars including pre/post market
+        intradayVwapLast:
+          type: ["number", "null"]
+          description: Final cumulative VWAP value at end of regular session
+        currentVsVwapPct:
+          type: ["number", "null"]
+          description: (latestPrice / intradayVwapLast - 1) * 100
+        pctRegularMinutesAboveVwap:
+          type: ["number", "null"]
+          description: Percent of regular-session 1m bars where close > VWAP
+        pctAfterHoursAboveVwap:
+          type: ["number", "null"]
+          description: Percent of after-hours bars where close > regular-session VWAP
+        fetchError:
+          type: ["string", "null"]
+          description: Error message if this symbol failed to fetch
+      required:
+        - symbol
+    BatchSummaryResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SymbolSummaryItem"
+        tradeDate:
+          type: string
+          description: The trade date used for this query (ET)
+        fetchedAt:
+          type: string
+          description: ISO timestamp when the batch completed
+      required:
+        - results
+        - tradeDate
+        - fetchedAt
     ErrorResponse:
       type: object
       properties:

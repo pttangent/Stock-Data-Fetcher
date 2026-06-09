@@ -6,16 +6,22 @@
  * OpenAPI spec version: 0.1.0
  */
 import {
+  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
 
 import type {
+  BatchSummaryRequest,
+  BatchSummaryResponse,
   ErrorResponse,
   GetStockHistoryParams,
   GetStockInfoParams,
@@ -25,7 +31,7 @@ import type {
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
-import type { ErrorType } from '../custom-fetch';
+import type { ErrorType , BodyType } from '../custom-fetch';
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -283,4 +289,77 @@ export function useGetStockInfo<TData = Awaited<ReturnType<typeof getStockInfo>>
 
 
 
+
+export const getBatchStockSummaryUrl = () => {
+
+
+
+
+  return `/api/stocks/batch-summary`
+}
+
+/**
+ * For each symbol, fetches today's 1m intraday bars (including pre/post market), computes regular-session VWAP, % of minutes above VWAP, latest price, after-hours price, and daily OHLCV. Uses US/Eastern timezone for session logic.
+
+ * @summary Batch today summary for a list of symbols
+ */
+export const batchStockSummary = async (batchSummaryRequest: BatchSummaryRequest, options?: RequestInit): Promise<BatchSummaryResponse> => {
+
+  return customFetch<BatchSummaryResponse>(getBatchStockSummaryUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      batchSummaryRequest,)
+  }
+);}
+
+
+
+
+export const getBatchStockSummaryMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof batchStockSummary>>, TError,{data: BodyType<BatchSummaryRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof batchStockSummary>>, TError,{data: BodyType<BatchSummaryRequest>}, TContext> => {
+
+const mutationKey = ['batchStockSummary'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof batchStockSummary>>, {data: BodyType<BatchSummaryRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  batchStockSummary(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BatchStockSummaryMutationResult = NonNullable<Awaited<ReturnType<typeof batchStockSummary>>>
+    export type BatchStockSummaryMutationBody = BodyType<BatchSummaryRequest>
+    export type BatchStockSummaryMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Batch today summary for a list of symbols
+ */
+export const useBatchStockSummary = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof batchStockSummary>>, TError,{data: BodyType<BatchSummaryRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof batchStockSummary>>,
+        TError,
+        {data: BodyType<BatchSummaryRequest>},
+        TContext
+      > => {
+      return useMutation(getBatchStockSummaryMutationOptions(options));
+    }
 

@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './batchSummaryRequest';
+export * from './batchSummaryResponse';
 export * from './errorResponse';
 export * from './getStockHistoryInterval';
 export * from './getStockHistoryParams';
@@ -15,3 +17,4 @@ export * from './healthStatus';
 export * from './oHLCVBar';
 export * from './stockHistoryResult';
 export * from './stockInfo';
+export * from './symbolSummaryItem';
