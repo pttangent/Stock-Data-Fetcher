@@ -209,10 +209,11 @@ async function fetchSymbolSummary(symbol: string) {
       ? getBarSession(latestBar.date)
       : null;
 
-    // Latest price vs previous close
+    // Latest price vs most recent regular-session close (dayClose),
+    // i.e. "how far is the current tick from yesterday's close?"
     const latestChgPct =
-      latestPrice != null && prevClose
-        ? Math.round(((latestPrice / prevClose - 1) * 100) * 100) / 100
+      latestPrice != null && dayClose
+        ? Math.round(((latestPrice / dayClose - 1) * 100) * 100) / 100
         : null;
 
     return {

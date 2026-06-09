@@ -270,7 +270,7 @@ components:
           description: Session type of the most recent 1m bar
         latestChgPct:
           type: ["number", "null"]
-          description: (latestPrice / prevClose - 1) * 100
+          description: (latestPrice / dayClose - 1) * 100 — latest tick vs most recent regular-session close
         latestBarTimeEt:
           type: ["string", "null"]
           description: Timestamp of the latest 1m bar in ET
