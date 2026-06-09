@@ -28,19 +28,20 @@ export default function Home() {
     { query: { enabled: !!symbol && symbol.length > 0, queryKey: [`/api/stocks/info`, { symbol }] } }
   );
 
-  const copyToClipboard = useCallback(async (data: StockHistoryResult[], fetchedSymbol: string) => {
+  const copyToClipboard = useCallback(async (data: StockHistoryResult[], _fetchedSymbol: string) => {
     try {
-      const summary = {
-        symbol: fetchedSymbol,
-        queries: data.map(r => ({
-          period: r.period,
-          interval: r.interval,
-          rowCount: r.rowCount
-        })),
-        fetchedAt: new Date().toISOString()
-      };
-      
-      await navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
+      const blocks = data.map(r => {
+        const header = `# ${r.symbol} | period=${r.period} | interval=${r.interval} | rows=${r.rowCount} | fetchedAt=${r.fetchedAt}`;
+        const csv = [
+          "date,open,high,low,close,volume",
+          ...r.data.map(row =>
+            [row.date, row.open ?? "", row.high ?? "", row.low ?? "", row.close ?? "", row.volume ?? ""].join(",")
+          )
+        ].join("\n");
+        return `${header}\n${csv}`;
+      });
+
+      await navigator.clipboard.writeText(blocks.join("\n\n"));
       setCopyStatus("success");
       setTimeout(() => setCopyStatus("idle"), 3000);
     } catch (err) {
