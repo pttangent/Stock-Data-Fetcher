@@ -268,6 +268,29 @@ async function fetchSymbolSummary(symbol: string) {
   }
 }
 
+// ─── Concurrency helper ───────────────────────────────────────────────────────
+
+async function asyncPool<T, R>(
+  poolLimit: number,
+  array: T[],
+  iteratorFn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const ret: Promise<R>[] = [];
+  const executing: Promise<void>[] = [];
+  for (const item of array) {
+    const p = Promise.resolve().then(() => iteratorFn(item));
+    ret.push(p);
+    const e = p.then(() => undefined);
+    executing.push(e);
+    if (executing.length >= poolLimit) {
+      await Promise.race(executing);
+      const doneIdx = executing.findIndex((x) => x === e);
+      if (doneIdx !== -1) executing.splice(doneIdx, 1);
+    }
+  }
+  return Promise.all(ret);
+}
+
 // ─── Route ───────────────────────────────────────────────────────────────────
 
 router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
@@ -292,14 +315,12 @@ router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
     day: "2-digit",
   }).format(new Date());
 
-  req.log.info({ symbols, tradeDate }, "batch-summary request");
+  req.log.info({ symbols: symbols.length, tradeDate }, "batch-summary request");
 
   try {
-    const results = [];
-    for (const symbol of symbols) {
-      const item = await fetchSymbolSummary(symbol.trim());
-      results.push(item);
-    }
+    const results = await asyncPool(10, symbols, (symbol) =>
+      fetchSymbolSummary(symbol.trim()),
+    );
 
     res.json({
       results,
