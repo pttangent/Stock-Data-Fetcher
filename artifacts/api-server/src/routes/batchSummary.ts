@@ -3,7 +3,7 @@ import { Router, type IRouter } from "express";
 import YahooFinanceClass from "yahoo-finance2";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const yf = new (YahooFinanceClass as any)();
+const yf = new (YahooFinanceClass as any)({ suppressNotices: ["yahooSurvey"] });
 
 const router: IRouter = Router();
 
@@ -104,49 +104,107 @@ function computeVwap(bars: Bar[]): {
   };
 }
 
+// ─── Rate-limit helpers ──────────────────────────────────────────────────────
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Yahoo expects hyphens for symbols that contain dots (e.g. BRK-B instead of BRK.B)
+function normalizeYahooSymbol(sym: string): string {
+  return sym.trim().toUpperCase().replace(/\./g, "-");
+}
+
+async function fetchQuotesBatch(
+  symbols: string[],
+): Promise<Record<string, Record<string, unknown>>> {
+  const map: Record<string, Record<string, unknown>> = {};
+  const chunkSize = 100;
+  for (let i = 0; i < symbols.length; i += chunkSize) {
+    const originals = symbols.slice(i, i + chunkSize);
+    const normalized = originals.map(normalizeYahooSymbol);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const quotesObj = (await yf.quote(
+        normalized,
+        { return: "object" } as any,
+        { validateResult: false },
+      )) as Record<string, Record<string, unknown>>;
+      for (let j = 0; j < originals.length; j++) {
+        const orig = originals[j].trim().toUpperCase();
+        const norm = normalized[j];
+        const q = quotesObj[norm];
+        if (q) map[orig] = q;
+      }
+    } catch {
+      // Batch failed — fall back to individual quotes with delay
+      for (const sym of originals) {
+        const norm = normalizeYahooSymbol(sym);
+        try {
+          const q = (await yf.quote(norm, undefined, { validateResult: false })) as Record<string, unknown>;
+          map[sym.trim().toUpperCase()] = q;
+        } catch {
+          // leave missing
+        }
+        await sleep(200);
+      }
+    }
+    if (i + chunkSize < symbols.length) {
+      await sleep(500);
+    }
+  }
+  return map;
+}
+
 // ─── Per-symbol fetch ─────────────────────────────────────────────────────────
 
-async function fetchSymbolSummary(symbol: string) {
+async function fetchSymbolSummary(
+  symbol: string,
+  prefetchedQuote?: Record<string, unknown>,
+) {
   const sym = symbol.toUpperCase();
+  const yahooSym = normalizeYahooSymbol(sym);
 
   try {
     // ── 1. Quote: name, price fields, prev close ──────────────────────────
+    let quote: Record<string, unknown>;
+    if (prefetchedQuote) {
+      quote = prefetchedQuote;
+    } else {
+      quote = (await yf.quote(yahooSym, undefined, { validateResult: false })) as Record<string, unknown>;
+    }
+
+    if (!quote || Object.keys(quote).length === 0) {
+      throw new Error("No quote data");
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const quote: Record<string, any> = await yf.quote(sym);
+    const q = quote as Record<string, any>;
 
-    const shortName = (quote.shortName as string | null) ?? null;
-    const exchange = (quote.exchange as string | null) ?? null;
-    const currency = (quote.currency as string | null) ?? null;
+    const shortName = (q.shortName as string | null) ?? null;
+    const exchange = (q.exchange as string | null) ?? null;
+    const currency = (q.currency as string | null) ?? null;
 
-    // Regular-session OHLCV from quote
-    const dayOpen = (quote.regularMarketOpen as number | null) ?? null;
-    const dayHigh = (quote.regularMarketDayHigh as number | null) ?? null;
-    const dayLow = (quote.regularMarketDayLow as number | null) ?? null;
-    const dayClose = (quote.regularMarketPrice as number | null) ?? null;
-    const dayVolume = (quote.regularMarketVolume as number | null) ?? null;
+    const dayOpen = (q.regularMarketOpen as number | null) ?? null;
+    const dayHigh = (q.regularMarketDayHigh as number | null) ?? null;
+    const dayLow = (q.regularMarketDayLow as number | null) ?? null;
+    const dayClose = (q.regularMarketPrice as number | null) ?? null;
+    const dayVolume = (q.regularMarketVolume as number | null) ?? null;
 
-    // Previous close — used for real daily return calculation
     const prevClose =
-      (quote.regularMarketPreviousClose as number | null) ??
-      (quote.previousClose as number | null) ??
+      (q.regularMarketPreviousClose as number | null) ??
+      (q.previousClose as number | null) ??
       null;
 
-    // Intraday change: close vs open (same day)
     const intradayReturnPct =
       dayOpen && dayClose
         ? Math.round(((dayClose / dayOpen - 1) * 100) * 100) / 100
         : null;
 
-    // vs previous close: the actual overnight + intraday return shown in markets
     const vsPreClosePct =
       prevClose && dayClose
         ? Math.round(((dayClose / prevClose - 1) * 100) * 100) / 100
         : null;
 
     // ── 2. 1m intraday bars: fetch last 3 days, find most recent trading day ─
-    // Yahoo Finance keeps ~2 trading days of 1m data.
-    // period1 = 3 calendar days ago at 08:00 UTC (~4am EDT) to cover pre-market.
-    // period2 = now — forcing Yahoo to return the available window.
     const period1 = new Date(Date.now() - 3 * 86_400_000);
     period1.setUTCHours(8, 0, 0, 0);
     const period2 = new Date();
@@ -154,23 +212,23 @@ async function fetchSymbolSummary(symbol: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let chartResult: any = null;
     try {
-      chartResult = await yf.chart(sym, {
-        period1,
-        period2,
-        interval: "1m",
-      });
+      chartResult = await yf.chart(
+        yahooSym,
+        { period1, period2, interval: "1m" },
+        { validateResult: false },
+      );
     } catch {
       // silently continue — VWAP fields will be null
     }
 
     const rawQuotes: Array<Record<string, unknown>> = chartResult?.quotes ?? [];
-    const allBars: Bar[] = rawQuotes.map((q) => ({
-      date: q.date instanceof Date ? (q.date as Date) : new Date(String(q.date)),
-      open: (q.open as number | null) ?? null,
-      high: (q.high as number | null) ?? null,
-      low: (q.low as number | null) ?? null,
-      close: (q.close as number | null) ?? null,
-      volume: (q.volume as number | null) ?? null,
+    const allBars: Bar[] = rawQuotes.map((r) => ({
+      date: r.date instanceof Date ? (r.date as Date) : new Date(String(r.date)),
+      open: (r.open as number | null) ?? null,
+      high: (r.high as number | null) ?? null,
+      low: (r.low as number | null) ?? null,
+      close: (r.close as number | null) ?? null,
+      volume: (r.volume as number | null) ?? null,
     }));
 
     // ── 3. Group bars by ET date ──────────────────────────────────────────
@@ -198,8 +256,16 @@ async function fetchSymbolSummary(symbol: string) {
     }
 
     // ── 5. Compute VWAP from that day's bars ─────────────────────────────
-    const { intradayVwapLast, pctRegularMinutesAboveVwap, regularBarCount } =
+    let { intradayVwapLast, pctRegularMinutesAboveVwap, regularBarCount } =
       computeVwap(vwapBars);
+
+    // Fallback: if no bars had valid volume but quote OHLC is available,
+    // approximate VWAP from the day's typical price so the field is never null.
+    if (intradayVwapLast == null && dayHigh != null && dayLow != null && dayClose != null) {
+      const typical = (dayHigh + dayLow + dayClose) / 3;
+      intradayVwapLast = Math.round(typical * 10000) / 10000;
+      // pctRegularMinutesAboveVwap stays null — we don't have intraday bars to judge.
+    }
 
     // ── 6. Latest bar across ALL fetched bars ────────────────────────────
     const latestBar = allBars.length > 0 ? allBars[allBars.length - 1] : null;
@@ -209,8 +275,6 @@ async function fetchSymbolSummary(symbol: string) {
       ? getBarSession(latestBar.date)
       : null;
 
-    // Latest price vs most recent regular-session close (dayClose),
-    // i.e. "how far is the current tick from yesterday's close?"
     const latestChgPct =
       latestPrice != null && dayClose
         ? Math.round(((latestPrice / dayClose - 1) * 100) * 100) / 100
@@ -268,29 +332,6 @@ async function fetchSymbolSummary(symbol: string) {
   }
 }
 
-// ─── Concurrency helper ───────────────────────────────────────────────────────
-
-async function asyncPool<T, R>(
-  poolLimit: number,
-  array: T[],
-  iteratorFn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const ret: Promise<R>[] = [];
-  const executing: Promise<void>[] = [];
-  for (const item of array) {
-    const p = Promise.resolve().then(() => iteratorFn(item));
-    ret.push(p);
-    const e = p.then(() => undefined);
-    executing.push(e);
-    if (executing.length >= poolLimit) {
-      await Promise.race(executing);
-      const doneIdx = executing.findIndex((x) => x === e);
-      if (doneIdx !== -1) executing.splice(doneIdx, 1);
-    }
-  }
-  return Promise.all(ret);
-}
-
 // ─── Route ───────────────────────────────────────────────────────────────────
 
 router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
@@ -318,9 +359,19 @@ router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
   req.log.info({ symbols: symbols.length, tradeDate }, "batch-summary request");
 
   try {
-    const results = await asyncPool(10, symbols, (symbol) =>
-      fetchSymbolSummary(symbol.trim()),
-    );
+    // 1. Batch-fetch all quotes first (drastically reduces Yahoo API calls)
+    const quotesMap = await fetchQuotesBatch(symbols);
+
+    // 2. Fetch 1m chart data sequentially with delay to avoid rate limits
+    const results = [];
+    for (let i = 0; i < symbols.length; i++) {
+      const symbol = symbols[i].trim();
+      const item = await fetchSymbolSummary(symbol, quotesMap[symbol.toUpperCase()]);
+      results.push(item);
+      if (i < symbols.length - 1) {
+        await sleep(120);
+      }
+    }
 
     res.json({
       results,
