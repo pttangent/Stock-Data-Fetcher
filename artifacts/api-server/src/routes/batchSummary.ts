@@ -277,12 +277,11 @@ router.post("/stocks/batch-summary", async (req, res): Promise<void> => {
   if (
     !Array.isArray(symbols) ||
     symbols.length === 0 ||
-    symbols.length > 100 ||
     symbols.some((s) => typeof s !== "string" || s.trim() === "")
   ) {
     res
       .status(400)
-      .json({ error: "symbols must be a non-empty array of up to 100 ticker strings" });
+      .json({ error: "symbols must be a non-empty array of ticker strings" });
     return;
   }
 

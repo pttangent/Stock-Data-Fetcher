@@ -71,12 +71,11 @@ export const GetStockInfoResponse = zod.object({
 
  * @summary Batch today summary for a list of symbols
  */
-export const batchStockSummaryBodySymbolsMax = 100;
 
 
 
 export const BatchStockSummaryBody = zod.object({
-  "symbols": zod.array(zod.string()).min(1).max(batchStockSummaryBodySymbolsMax).describe('List of ticker symbols to query'),
+  "symbols": zod.array(zod.string()).min(1).describe('List of ticker symbols to query'),
   "date": zod.string().nullish().describe('Trade date YYYY-MM-DD (ET). Defaults to today in US\/Eastern.')
 })
 
@@ -96,7 +95,7 @@ export const BatchStockSummaryResponse = zod.object({
   "vsPreClosePct": zod.number().nullish().describe('(dayClose \/ prevClose - 1) \* 100 — overnight + intraday return vs prior close'),
   "latestPrice": zod.number().nullish().describe('Most recent 1m bar close (pre\/regular\/after-hours)'),
   "latestSession": zod.union([zod.literal('premarket'),zod.literal('regular'),zod.literal('afterhours'),zod.literal(null)]).nullish().describe('Session type of the most recent 1m bar'),
-  "latestChgPct": zod.number().nullish().describe('(latestPrice \/ prevClose - 1) \* 100'),
+  "latestChgPct": zod.number().nullish().describe('(latestPrice \/ dayClose - 1) \* 100 — latest tick vs most recent regular-session close'),
   "latestBarTimeEt": zod.string().nullish().describe('Timestamp of the latest 1m bar in ET'),
   "vwapDate": zod.string().nullish().describe('ET date of the trading day used for VWAP calculation'),
   "regularBarCount": zod.number().nullish().describe('Number of regular-session 1m bars in the VWAP day'),

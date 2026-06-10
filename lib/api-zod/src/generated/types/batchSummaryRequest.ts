@@ -10,7 +10,6 @@ export interface BatchSummaryRequest {
   /**
      * List of ticker symbols to query
      * @minItems 1
-     * @maxItems 100
      */
   symbols: string[];
   /**

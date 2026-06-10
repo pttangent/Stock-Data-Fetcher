@@ -60,7 +60,6 @@ export interface BatchSummaryRequest {
   /**
      * List of ticker symbols to query
      * @minItems 1
-     * @maxItems 100
      */
   symbols: string[];
   /**
@@ -130,7 +129,7 @@ export interface SymbolSummaryItem {
      */
   latestSession?: SymbolSummaryItemLatestSession;
   /**
-     * (latestPrice / prevClose - 1) * 100
+     * (latestPrice / dayClose - 1) * 100 — latest tick vs most recent regular-session close
      * @nullable
      */
   latestChgPct?: number | null;

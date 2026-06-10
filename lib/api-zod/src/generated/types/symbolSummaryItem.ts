@@ -54,7 +54,7 @@ export interface SymbolSummaryItem {
      */
   latestSession?: SymbolSummaryItemLatestSession;
   /**
-     * (latestPrice / prevClose - 1) * 100
+     * (latestPrice / dayClose - 1) * 100 — latest tick vs most recent regular-session close
      * @nullable
      */
   latestChgPct?: number | null;
