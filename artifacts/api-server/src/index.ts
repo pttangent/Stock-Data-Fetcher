@@ -22,4 +22,13 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Start market snapshot scheduler if DB is available
+  if (process.env.DATABASE_URL) {
+    import("./services/snapshot").then(({ startSnapshotScheduler }) => {
+      startSnapshotScheduler();
+    }).catch((e) => {
+      logger.error({ err: e }, "Failed to start snapshot scheduler");
+    });
+  }
 });

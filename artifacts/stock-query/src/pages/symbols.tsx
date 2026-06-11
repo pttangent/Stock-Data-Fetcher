@@ -253,60 +253,6 @@ export default function Symbols({ onSymbolClick }: { onSymbolClick: (sym: string
   const [parseError, setParseError] = useState<string | null>(null);
 
   const { mutate, isPending, data, error } = useBatchStockSummary();
-  const [csvLoading, setCsvLoading] = useState<string | null>(null);
-
-  const fetchTickers = async (path: string): Promise<string[]> => {
-    const res = await fetch(path);
-    if (!res.ok) throw new Error(`Failed to load ${path}`);
-    const text = await res.text();
-    const lines = text.split(/\r?\n/);
-    let started = false;
-    const tickers: string[] = [];
-    for (const line of lines) {
-      if (!started) {
-        if (line.startsWith("Ticker")) started = true;
-        continue;
-      }
-      const ticker = line.split(',')[0].trim().toUpperCase();
-      if (ticker && /^[A-Z0-9.]+$/.test(ticker)) {
-        tickers.push(ticker);
-      }
-    }
-    return tickers;
-  };
-
-  const loadAndQuery = async (type: "stocks" | "etfs" | "combined") => {
-    setCsvLoading(type);
-    setParseError(null);
-    try {
-      let categories: Record<string, string[]>;
-      if (type === "stocks") {
-        const tickers = await fetchTickers("/data/P123_Screen_0_20260606.csv");
-        categories = { "All Stocks": tickers };
-      } else if (type === "etfs") {
-        const tickers = await fetchTickers("/data/P123_ETFCEF.csv");
-        categories = { "All ETF/CEF": tickers };
-      } else {
-        const [stocks, etfs] = await Promise.all([
-          fetchTickers("/data/P123_Screen_0_20260606.csv"),
-          fetchTickers("/data/P123_ETFCEF.csv"),
-        ]);
-        categories = { "All Stocks + ETF/CEF": [...stocks, ...etfs] };
-      }
-      const categoryText = Object.entries(categories)
-        .map(([cat, syms]) => `    "${cat}": [\n        ${syms.map(s => `"${s}"`).join(", ")}\n    ]`)
-        .join(",\n");
-      setInputText(`CATEGORY_SYMBOLS = {\n${categoryText}\n}`);
-      const all = [...new Set(Object.values(categories).flat())];
-      if (all.length > 0) {
-        mutate({ data: { symbols: all } });
-      }
-    } catch (err) {
-      setParseError(err instanceof Error ? err.message : "載入 CSV 失敗");
-    } finally {
-      setCsvLoading(null);
-    }
-  };
 
   // Parsed categories (live, from current inputText)
   const parsedCategories = useMemo<Record<string, string[]> | null>(() => {
@@ -435,19 +381,8 @@ export default function Symbols({ onSymbolClick }: { onSymbolClick: (sym: string
                 </Button>
               )}
 
-              <div className="space-y-2 pt-2 border-t border-border">
-                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">全市場掃描 / Market Scan</label>
-                <div className="grid grid-cols-1 gap-2">
-                  <Button variant="outline" onClick={() => loadAndQuery("stocks")} disabled={isPending || !!csvLoading} className="font-mono text-xs">
-                    {csvLoading === "stocks" ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null} All Stock
-                  </Button>
-                  <Button variant="outline" onClick={() => loadAndQuery("etfs")} disabled={isPending || !!csvLoading} className="font-mono text-xs">
-                    {csvLoading === "etfs" ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null} All ETF/CEF
-                  </Button>
-                  <Button variant="outline" onClick={() => loadAndQuery("combined")} disabled={isPending || !!csvLoading} className="font-mono text-xs">
-                    {csvLoading === "combined" ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : null} All Stock + ETF/CEF
-                  </Button>
-                </div>
+              <div className="text-[10px] text-muted-foreground border border-border p-2 bg-muted/10">
+                <span className="text-primary font-bold">Tip: 全市場快照已移至「全市場快照 / SNAPSHOT」分頁，每 30 分鐘自動更新。</span>
               </div>
             </div>
 
