@@ -1,0 +1,73 @@
+name: SEC CIK live smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/sec-cik-live-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PORT: "3001"
+      SEC_USER_AGENT: "pttangent Stock-Data-Fetcher 109568219+pttangent@users.noreply.github.com"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build and start API
+        run: |
+          mkdir -p cik-smoke
+          pnpm --filter @workspace/api-server build > cik-smoke/api-build.log 2>&1
+          node artifacts/api-server/dist/index.mjs > cik-smoke/server.log 2>&1 &
+          for i in {1..30}; do
+            curl -fsS http://127.0.0.1:3001/api/healthz > cik-smoke/health.json && exit 0
+            sleep 1
+          done
+          cat cik-smoke/server.log
+          exit 1
+      - name: Query Apple by official CIK
+        run: |
+          status=$(curl --retry 2 --retry-all-errors -sS -w "%{http_code}" \
+            "http://127.0.0.1:3001/api/sec/filings?cik=320193&forms=10-K,10-Q,8-K&limit=5&includeAmendments=true&includeDocument=true&documentLimit=1" \
+            -o cik-smoke/sec-aapl-cik.json)
+          echo "$status" > cik-smoke/http-status.txt
+          cat cik-smoke/sec-aapl-cik.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const status = Number(fs.readFileSync('cik-smoke/http-status.txt', 'utf8'));
+          const data = JSON.parse(fs.readFileSync('cik-smoke/sec-aapl-cik.json', 'utf8'));
+          const summary = {
+            httpStatus: status,
+            query: data.query ?? null,
+            company: data.company ?? null,
+            filingCount: data.filings?.length ?? 0,
+            latestFiling: data.filings?.[0] ?? null,
+            evidenceChain: data.evidenceChain ?? null,
+            error: data.error ?? null
+          };
+          fs.writeFileSync('cik-smoke/summary.json', JSON.stringify(summary, null, 2));
+          console.log(JSON.stringify(summary, null, 2));
+          if (status !== 200) throw new Error(`SEC HTTP ${status}: ${data.error ?? 'unknown'}`);
+          if (!summary.latestFiling?.acceptanceDateTime) throw new Error('acceptanceDateTime missing');
+          if (!summary.latestFiling?.documentEvidence?.sha256) throw new Error('document SHA-256 missing');
+          NODE
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sec-cik-live-${{ github.sha }}
+          path: cik-smoke/
+          if-no-files-found: error
+          retention-days: 14
