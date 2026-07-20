@@ -19,5 +19,8 @@ export const insertMarketSnapshotSchema = createInsertSchema(marketSnapshotsTabl
   fetchedAt: true,
 });
 
-export type InsertMarketSnapshot = z.infer<typeof insertMarketSnapshotSchema>;
+export type InsertMarketSnapshot = Omit<
+  typeof marketSnapshotsTable.$inferInsert,
+  "id" | "fetchedAt"
+>;
 export type MarketSnapshot = typeof marketSnapshotsTable.$inferSelect;
