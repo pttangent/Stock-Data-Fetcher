@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 20
     env:
       PORT: "3001"
+      BASE_PATH: "/"
       SEC_USER_AGENT: "Stock-Data-Fetcher smoke-test pttangent@users.noreply.github.com"
     steps:
       - uses: actions/checkout@v4
