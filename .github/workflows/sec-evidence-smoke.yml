@@ -1,0 +1,112 @@
+name: SEC evidence smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "artifacts/api-server/**"
+      - "artifacts/stock-query/**"
+      - "lib/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/sec-evidence-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PORT: "3001"
+      SEC_USER_AGENT: "Stock-Data-Fetcher smoke-test pttangent@users.noreply.github.com"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck workspace
+        run: pnpm typecheck
+
+      - name: Build API and UI
+        run: |
+          pnpm --filter @workspace/api-server build
+          pnpm --filter @workspace/stock-query build
+
+      - name: Start API
+        run: |
+          mkdir -p smoke-results
+          node artifacts/api-server/dist/index.mjs > smoke-results/server.log 2>&1 &
+          echo $! > smoke-results/server.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3001/api/healthz > smoke-results/health.json; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat smoke-results/server.log
+          exit 1
+
+      - name: Query AAPL SEC and Yahoo
+        run: |
+          curl --retry 3 --retry-all-errors --fail-with-body -sS \
+            "http://127.0.0.1:3001/api/sec/filings?symbol=AAPL&forms=10-K,10-Q,8-K&limit=5&includeAmendments=true&includeDocument=true&documentLimit=1" \
+            -o smoke-results/sec-aapl.json
+          curl --retry 3 --retry-all-errors --fail-with-body -sS \
+            "http://127.0.0.1:3001/api/stocks/info?symbol=AAPL" \
+            -o smoke-results/yahoo-info-aapl.json
+          curl --retry 3 --retry-all-errors --fail-with-body -sS \
+            "http://127.0.0.1:3001/api/stocks/history?symbol=AAPL&period=1d&interval=1m" \
+            -o smoke-results/yahoo-history-aapl.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const sec = JSON.parse(fs.readFileSync('smoke-results/sec-aapl.json', 'utf8'));
+          const info = JSON.parse(fs.readFileSync('smoke-results/yahoo-info-aapl.json', 'utf8'));
+          const history = JSON.parse(fs.readFileSync('smoke-results/yahoo-history-aapl.json', 'utf8'));
+          const summary = {
+            company: sec.company,
+            filingCount: sec.filings?.length ?? 0,
+            latestFiling: sec.filings?.[0] ?? null,
+            evidenceChain: sec.evidenceChain,
+            yahooInfo: info,
+            yahooHistory: {
+              symbol: history.symbol,
+              interval: history.interval,
+              rowCount: history.rowCount,
+              provider: history.provider,
+              providerTimestamp: history.providerTimestamp,
+              fetchedAt: history.fetchedAt,
+              pointInTimeGuarantee: history.pointInTimeGuarantee,
+              firstBar: history.data?.[0] ?? null,
+              lastBar: history.data?.at?.(-1) ?? null
+            }
+          };
+          fs.writeFileSync('smoke-results/summary.json', JSON.stringify(summary, null, 2));
+          console.log(JSON.stringify(summary, null, 2));
+          if (!sec.filings?.length) throw new Error('SEC returned no filings');
+          if (!sec.filings[0]?.acceptanceDateTime) throw new Error('SEC acceptanceDateTime missing');
+          if (!sec.filings[0]?.documentEvidence?.sha256) throw new Error('SEC SHA-256 evidence missing');
+          if (info.provider !== 'Yahoo Finance') throw new Error('Yahoo evidence metadata missing');
+          if (history.pointInTimeGuarantee !== false) throw new Error('Yahoo PIT warning missing');
+          NODE
+
+      - name: Upload smoke result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sec-evidence-smoke-${{ github.sha }}
+          path: smoke-results/
+          if-no-files-found: error
+          retention-days: 14
