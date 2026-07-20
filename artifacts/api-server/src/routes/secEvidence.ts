@@ -10,6 +10,7 @@ const DEFAULT_FORMS = ["10-K", "10-Q", "8-K"];
 const MAX_RESULTS = 50;
 const MAX_DOCUMENTS = 3;
 const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+const MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
 const SEC_REQUEST_GAP_MS = 150;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -75,7 +76,42 @@ function setCached<T>(key: string, value: T, ttlMs: number): T {
   return value;
 }
 
-async function fetchSecText(url: string, ttlMs: number): Promise<SecFetchResult> {
+async function readBodyWithLimit(response: Response, maxBytes: number): Promise<string> {
+  const declaredBytes = Number.parseInt(response.headers.get("content-length") ?? "0", 10);
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    throw new Error(`SEC response exceeds ${maxBytes} bytes`);
+  }
+
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel();
+      throw new Error(`SEC response exceeds ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8").decode(combined);
+}
+
+async function fetchSecText(
+  url: string,
+  ttlMs: number,
+  maxBytes = MAX_RESPONSE_BYTES,
+): Promise<SecFetchResult> {
   const cached = getCached<SecFetchResult>(url);
   if (cached) return cached;
 
@@ -100,7 +136,7 @@ async function fetchSecText(url: string, ttlMs: number): Promise<SecFetchResult>
         },
         signal: controller.signal,
       });
-      const body = await response.text();
+      const body = response.ok ? await readBodyWithLimit(response, maxBytes) : "";
 
       if (response.ok) {
         return setCached(
@@ -294,18 +330,12 @@ router.get("/sec/filings", async (req, res): Promise<void> => {
       const filing = filings[index];
       if (!filing.primaryDocumentUrl) continue;
       try {
-        const document = await fetchSecText(filing.primaryDocumentUrl, 60 * 60 * 1000);
+        const document = await fetchSecText(
+          filing.primaryDocumentUrl,
+          60 * 60 * 1000,
+          MAX_DOCUMENT_BYTES,
+        );
         const bytes = Buffer.byteLength(document.body, "utf8");
-        if (bytes > MAX_DOCUMENT_BYTES) {
-          filing.documentEvidence = {
-            fetchedAt: document.fetchedAt,
-            contentType: document.contentType,
-            bytes,
-            skipped: true,
-            reason: `Document exceeds ${MAX_DOCUMENT_BYTES} bytes`,
-          };
-          continue;
-        }
 
         filing.documentEvidence = {
           fetchedAt: document.fetchedAt,
