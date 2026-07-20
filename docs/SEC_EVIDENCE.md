@@ -58,3 +58,17 @@ Yahoo Finance data is an observation source, not an archival evidence source. It
 - request timeout and in-memory TTL cache;
 - bounded filing count, document count, and document size;
 - no hard-coded local paths or credentials.
+
+## Deterministic warehouse parsing
+
+The API/UI evidence view and the full-history archive are source-acquisition layers. After downloading complete submissions, run the separate deterministic parser:
+
+```bash
+pnpm --filter @workspace/scripts sec:parse -- \
+  --input "D:/SEC_WAREHOUSE" \
+  --output "D:/SEC_PARSED" \
+  --forms "10-K,10-Q,8-K,4,144,13F-HR" \
+  --document-mode all
+```
+
+This produces filing, document, Item/section, HTML table, XBRL fact, Form 4, Form 144, and 13F holding tables while preserving accession, acceptance time, source SHA-256, document SHA-256, and stable IDs. See `docs/SEC_EVIDENCE_CHAIN.md` and `tools/sec_pipeline/README.md` for the parsing contract and schemas.
