@@ -67,6 +67,10 @@ document. `none` emits tables and hashes without materializing document payloads
 The `documents/` tree mirrors ticker/CIK/accession and contains the separated payloads. `manifest.json`
 records parser/schema versions, inputs, filters, document mode, and table row counts.
 
+`sections.csv` and `tables.csv` may contain very large text fields. Python consumers using the standard
+`csv` module should call `csv.field_size_limit(sys.maxsize)` before reading them. DuckDB, Polars, or a later
+Parquet conversion is preferable for large research runs.
+
 ## Tests
 
 ```bash
