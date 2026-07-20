@@ -5,11 +5,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/home";
 import Symbols from "@/pages/symbols";
 import MarketSnapshot from "@/pages/market-snapshot";
+import SecEvidence from "@/pages/sec-evidence";
 
 const queryClient = new QueryClient();
 
+type ActiveTab = "stock" | "symbols" | "snapshot" | "sec";
+
 function AppContent() {
-  const [activeTab, setActiveTab] = useState<"stock" | "symbols" | "snapshot">("stock");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("stock");
   const [pendingSymbolQuery, setPendingSymbolQuery] = useState<string | null>(null);
 
   const handleSymbolClick = (sym: string) => {
@@ -19,10 +22,10 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-mono flex flex-col">
-      <nav className="border-b border-border flex shrink-0">
+      <nav className="border-b border-border flex shrink-0 overflow-x-auto">
         <button
           onClick={() => setActiveTab("stock")}
-          className={`flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
+          className={`min-w-[180px] flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
             activeTab === "stock"
               ? "border-primary text-primary bg-muted/10"
               : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
@@ -33,7 +36,7 @@ function AppContent() {
         <div className="w-px bg-border"></div>
         <button
           onClick={() => setActiveTab("symbols")}
-          className={`flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
+          className={`min-w-[180px] flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
             activeTab === "symbols"
               ? "border-primary text-primary bg-muted/10"
               : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
@@ -44,13 +47,24 @@ function AppContent() {
         <div className="w-px bg-border"></div>
         <button
           onClick={() => setActiveTab("snapshot")}
-          className={`flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
+          className={`min-w-[180px] flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
             activeTab === "snapshot"
               ? "border-primary text-primary bg-muted/10"
               : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
           }`}
         >
           全市場快照 / SNAPSHOT
+        </button>
+        <div className="w-px bg-border"></div>
+        <button
+          onClick={() => setActiveTab("sec")}
+          className={`min-w-[180px] flex-1 py-4 text-center text-sm font-bold tracking-widest uppercase transition-colors border-b-2 ${
+            activeTab === "sec"
+              ? "border-primary text-primary bg-muted/10"
+              : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/5"
+          }`}
+        >
+          SEC 證據鏈 / SEC
         </button>
       </nav>
       <div className="flex-1">
@@ -61,8 +75,10 @@ function AppContent() {
           />
         ) : activeTab === "symbols" ? (
           <Symbols onSymbolClick={handleSymbolClick} />
-        ) : (
+        ) : activeTab === "snapshot" ? (
           <MarketSnapshot />
+        ) : (
+          <SecEvidence />
         )}
       </div>
     </div>
