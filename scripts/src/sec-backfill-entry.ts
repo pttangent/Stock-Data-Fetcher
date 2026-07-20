@@ -3,3 +3,5 @@ if (process.argv[2] === "--") {
 }
 
 await import("./sec-backfill");
+
+export {};
