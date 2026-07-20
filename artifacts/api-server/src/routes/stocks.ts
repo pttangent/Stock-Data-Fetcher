@@ -30,6 +30,19 @@ type OHLCVBar = {
   volume: number | null;
 };
 
+function providerTimestamp(value: unknown): string | null {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const milliseconds = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(milliseconds).toISOString();
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+  }
+  return null;
+}
+
 async function fetchChunked(
   symbol: string,
   interval: string,
@@ -105,6 +118,7 @@ router.get("/stocks/history", async (req, res): Promise<void> => {
 
   try {
     const data = await fetchChunked(symbol, interval, startMs, endMs);
+    const fetchedAt = new Date().toISOString();
 
     res.json({
       symbol: symbol.toUpperCase(),
@@ -112,7 +126,12 @@ router.get("/stocks/history", async (req, res): Promise<void> => {
       interval,
       rowCount: data.length,
       data,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt,
+      provider: "Yahoo Finance",
+      providerTimestamp: data.length > 0 ? data[data.length - 1].date : null,
+      pointInTimeGuarantee: false,
+      evidenceNote:
+        "Bar timestamps identify observations, but historical replay requires persisting raw responses or using an archival feed.",
     });
   } catch (err) {
     req.log.error({ err, symbol, period, interval }, "Yahoo Finance chart error");
@@ -132,6 +151,7 @@ router.get("/stocks/info", async (req, res): Promise<void> => {
 
   try {
     const quote: Record<string, unknown> = await yf.quote(symbol);
+    const fetchedAt = new Date().toISOString();
 
     res.json({
       symbol: symbol.toUpperCase(),
@@ -144,6 +164,12 @@ router.get("/stocks/info", async (req, res): Promise<void> => {
       marketCap:        (quote.marketCap        as number | null) ?? null,
       fiftyTwoWeekHigh: (quote.fiftyTwoWeekHigh as number | null) ?? null,
       fiftyTwoWeekLow:  (quote.fiftyTwoWeekLow  as number | null) ?? null,
+      provider: "Yahoo Finance",
+      providerTimestamp: providerTimestamp(quote.regularMarketTime),
+      fetchedAt,
+      pointInTimeGuarantee: false,
+      evidenceNote:
+        "This is an observed Yahoo snapshot, not an official filing record or guaranteed historical as-of archive.",
     });
   } catch (err) {
     req.log.error({ err, symbol }, "Yahoo Finance quote error");
