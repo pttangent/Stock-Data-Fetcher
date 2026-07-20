@@ -37,49 +37,83 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck workspace
-        run: pnpm typecheck
-
-      - name: Build API and UI
+      - name: Capture typecheck and build diagnostics
         run: |
-          pnpm --filter @workspace/api-server build
-          pnpm --filter @workspace/stock-query build
+          mkdir -p smoke-results
+          set +e
+          pnpm typecheck > smoke-results/typecheck.log 2>&1
+          echo $? > smoke-results/typecheck.exit
+          pnpm --filter @workspace/api-server build > smoke-results/api-build.log 2>&1
+          echo $? > smoke-results/api-build.exit
+          pnpm --filter @workspace/stock-query build > smoke-results/ui-build.log 2>&1
+          echo $? > smoke-results/ui-build.exit
+          set -e
+          echo "typecheck=$(cat smoke-results/typecheck.exit) api_build=$(cat smoke-results/api-build.exit) ui_build=$(cat smoke-results/ui-build.exit)"
 
       - name: Start API
         run: |
-          mkdir -p smoke-results
-          node artifacts/api-server/dist/index.mjs > smoke-results/server.log 2>&1 &
+          if [ "$(cat smoke-results/api-build.exit)" = "0" ]; then
+            node artifacts/api-server/dist/index.mjs > smoke-results/server.log 2>&1 &
+          else
+            pnpm --filter @workspace/api-server exec tsx src/index.ts > smoke-results/server.log 2>&1 &
+          fi
           echo $! > smoke-results/server.pid
-          for i in {1..30}; do
+          ready=0
+          for i in {1..45}; do
             if curl -fsS http://127.0.0.1:3001/api/healthz > smoke-results/health.json; then
-              exit 0
+              ready=1
+              break
             fi
             sleep 1
           done
-          cat smoke-results/server.log
-          exit 1
+          echo "$ready" > smoke-results/api-ready
+          if [ "$ready" != "1" ]; then
+            cat smoke-results/server.log
+            exit 1
+          fi
 
       - name: Query AAPL SEC and Yahoo
         run: |
-          curl --retry 3 --retry-all-errors --fail-with-body -sS \
+          set +e
+          curl --retry 3 --retry-all-errors -sS -w "%{http_code}" \
             "http://127.0.0.1:3001/api/sec/filings?symbol=AAPL&forms=10-K,10-Q,8-K&limit=5&includeAmendments=true&includeDocument=true&documentLimit=1" \
-            -o smoke-results/sec-aapl.json
-          curl --retry 3 --retry-all-errors --fail-with-body -sS \
+            -o smoke-results/sec-aapl.json > smoke-results/sec-http-status.txt
+          echo $? > smoke-results/sec-curl.exit
+          curl --retry 3 --retry-all-errors -sS -w "%{http_code}" \
             "http://127.0.0.1:3001/api/stocks/info?symbol=AAPL" \
-            -o smoke-results/yahoo-info-aapl.json
-          curl --retry 3 --retry-all-errors --fail-with-body -sS \
+            -o smoke-results/yahoo-info-aapl.json > smoke-results/yahoo-info-http-status.txt
+          echo $? > smoke-results/yahoo-info-curl.exit
+          curl --retry 3 --retry-all-errors -sS -w "%{http_code}" \
             "http://127.0.0.1:3001/api/stocks/history?symbol=AAPL&period=1d&interval=1m" \
-            -o smoke-results/yahoo-history-aapl.json
+            -o smoke-results/yahoo-history-aapl.json > smoke-results/yahoo-history-http-status.txt
+          echo $? > smoke-results/yahoo-history-curl.exit
+          set -e
+
           node - <<'NODE'
           const fs = require('fs');
-          const sec = JSON.parse(fs.readFileSync('smoke-results/sec-aapl.json', 'utf8'));
-          const info = JSON.parse(fs.readFileSync('smoke-results/yahoo-info-aapl.json', 'utf8'));
-          const history = JSON.parse(fs.readFileSync('smoke-results/yahoo-history-aapl.json', 'utf8'));
+          const readJson = (path) => {
+            try { return JSON.parse(fs.readFileSync(path, 'utf8')); }
+            catch (error) { return { parseError: String(error), raw: fs.existsSync(path) ? fs.readFileSync(path, 'utf8').slice(0, 2000) : null }; }
+          };
+          const sec = readJson('smoke-results/sec-aapl.json');
+          const info = readJson('smoke-results/yahoo-info-aapl.json');
+          const history = readJson('smoke-results/yahoo-history-aapl.json');
+          const readText = (path) => fs.existsSync(path) ? fs.readFileSync(path, 'utf8').trim() : null;
           const summary = {
-            company: sec.company,
+            checks: {
+              typecheckExit: Number(readText('smoke-results/typecheck.exit')),
+              apiBuildExit: Number(readText('smoke-results/api-build.exit')),
+              uiBuildExit: Number(readText('smoke-results/ui-build.exit')),
+              apiReady: readText('smoke-results/api-ready') === '1',
+              secHttpStatus: Number(readText('smoke-results/sec-http-status.txt')),
+              yahooInfoHttpStatus: Number(readText('smoke-results/yahoo-info-http-status.txt')),
+              yahooHistoryHttpStatus: Number(readText('smoke-results/yahoo-history-http-status.txt'))
+            },
+            company: sec.company ?? null,
             filingCount: sec.filings?.length ?? 0,
             latestFiling: sec.filings?.[0] ?? null,
-            evidenceChain: sec.evidenceChain,
+            evidenceChain: sec.evidenceChain ?? null,
+            secError: sec.error ?? sec.parseError ?? null,
             yahooInfo: info,
             yahooHistory: {
               symbol: history.symbol,
@@ -89,17 +123,14 @@ jobs:
               providerTimestamp: history.providerTimestamp,
               fetchedAt: history.fetchedAt,
               pointInTimeGuarantee: history.pointInTimeGuarantee,
+              evidenceNote: history.evidenceNote,
               firstBar: history.data?.[0] ?? null,
-              lastBar: history.data?.at?.(-1) ?? null
+              lastBar: Array.isArray(history.data) ? history.data.at(-1) : null,
+              error: history.error ?? history.parseError ?? null
             }
           };
           fs.writeFileSync('smoke-results/summary.json', JSON.stringify(summary, null, 2));
           console.log(JSON.stringify(summary, null, 2));
-          if (!sec.filings?.length) throw new Error('SEC returned no filings');
-          if (!sec.filings[0]?.acceptanceDateTime) throw new Error('SEC acceptanceDateTime missing');
-          if (!sec.filings[0]?.documentEvidence?.sha256) throw new Error('SEC SHA-256 evidence missing');
-          if (info.provider !== 'Yahoo Finance') throw new Error('Yahoo evidence metadata missing');
-          if (history.pointInTimeGuarantee !== false) throw new Error('Yahoo PIT warning missing');
           NODE
 
       - name: Upload smoke result
@@ -110,3 +141,27 @@ jobs:
           path: smoke-results/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Validate smoke result
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const summary = JSON.parse(fs.readFileSync('smoke-results/summary.json', 'utf8'));
+          const failures = [];
+          if (summary.checks.typecheckExit !== 0) failures.push('workspace typecheck failed');
+          if (summary.checks.apiBuildExit !== 0) failures.push('API build failed');
+          if (summary.checks.uiBuildExit !== 0) failures.push('UI build failed');
+          if (!summary.checks.apiReady) failures.push('API did not become ready');
+          if (summary.checks.secHttpStatus !== 200) failures.push(`SEC HTTP ${summary.checks.secHttpStatus}`);
+          if (summary.filingCount < 1) failures.push('SEC returned no filings');
+          if (!summary.latestFiling?.acceptanceDateTime) failures.push('SEC acceptanceDateTime missing');
+          if (!summary.latestFiling?.documentEvidence?.sha256) failures.push('SEC SHA-256 evidence missing');
+          if (summary.checks.yahooInfoHttpStatus !== 200) failures.push(`Yahoo info HTTP ${summary.checks.yahooInfoHttpStatus}`);
+          if (summary.yahooInfo?.provider !== 'Yahoo Finance') failures.push('Yahoo info evidence metadata missing');
+          if (summary.checks.yahooHistoryHttpStatus !== 200) failures.push(`Yahoo history HTTP ${summary.checks.yahooHistoryHttpStatus}`);
+          if (summary.yahooHistory?.pointInTimeGuarantee !== false) failures.push('Yahoo PIT warning missing');
+          if (failures.length) {
+            console.error(failures.join('\n'));
+            process.exit(1);
+          }
+          NODE
