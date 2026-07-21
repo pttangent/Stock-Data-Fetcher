@@ -1,4 +1,4 @@
-# LLM Review Output Contract
+# LLM Review Output Contract — Trust Semantics
 
 ## Write boundary
 
@@ -9,40 +9,43 @@ The LLM must not directly update authoritative tables:
 - `evidence_snippet`;
 - existing deterministic `semantic_assertion` or `company_relation` rows.
 
-The reviewer writes append-only JSONL to:
+Write append-only JSONL to:
 
 ```text
-data/sec_yfinance/reviews/<run_id>/<batch_id>.jsonl
+data/sec_yfinance/reviews/<run_id>/<batch_id>/records.jsonl
 ```
 
-A separate validator or human approval step may promote an approved record. The LLM never writes an accepted fact directly.
+A separate validator or human approval step may promote a review result. The LLM never emits an accepted database status.
 
 ## One-record rule
 
-Each line represents one atomic decision for one primary evidence item and, where applicable, one reviewed assertion or relation.
+Each line represents one atomic semantic decision for one primary evidence item and one trust profile.
 
 Split records when they differ by:
 
-- occurred versus future/potential state;
-- actual versus estimate/guidance;
+- attribution or speaker;
+- actual versus estimate or interpretation;
+- occurred versus potential state;
 - counterparty or relation role;
 - product generation or lifecycle state;
-- period, segment, geography, accounting basis, or unit.
+- period, segment, geography, accounting basis, currency, unit, or scale;
+- evidence trust or inference depth.
 
 ## Required record
 
 ```json
 {
-  "schema_version": "sec-llm-review-v1",
+  "schema_version": "sec-llm-review-v2",
   "review_id": "stable review identifier",
-  "run_id": "pipeline or review run identifier",
+  "run_id": "review run identifier",
   "batch_id": "review batch identifier",
   "reviewed_assertion_id": null,
   "reviewed_relation_id": null,
   "resolves_prior_review_id": null,
-  "candidate_reason": "potential_future_event",
+  "candidate_reason": "trust_profile_reconstruction",
   "primary_evidence_id": "evidence identifier",
   "corroborating_evidence_ids": [],
+  "conflicting_evidence_ids": [],
   "security_id": "security identifier",
   "issuer_id": "issuer identifier",
   "symbol": "AMD",
@@ -65,7 +68,7 @@ Split records when they differ by:
     },
     "trigger_conditions": [
       "customer demand exists",
-      "Chinese import rules permit shipment",
+      "applicable import rules permit shipment",
       "required export licenses are available"
     ],
     "expected_window": null,
@@ -74,12 +77,28 @@ Split records when they differ by:
     "issuer_commitment_level": "conditional"
   },
   "explicitness": "explicit",
-  "confidence": 0.94,
+  "trust_profile": {
+    "evidence_integrity": "verified",
+    "source_authority": "filed_primary_document",
+    "statement_attribution": "management_estimate",
+    "semantic_directness": "explicit_text",
+    "inference_depth": 0,
+    "inference_premises": ["evidence identifier"],
+    "inference_bridge": null,
+    "temporal_eligibility": "eligible_datetime",
+    "scope_fidelity": "exact",
+    "corroboration_state": "single_information_event",
+    "contradiction_state": "none",
+    "economic_truth_status": "not_independently_assessed",
+    "semantic_support_score": 0.96,
+    "trust_tier": "C"
+  },
+  "confidence": 0.96,
   "status": "review_required",
   "effective_from": null,
   "effective_to": null,
   "delta_class": null,
-  "rationale": "The filing describes future sales as conditional on demand, import rules, and licenses; it does not report that those sales occurred.",
+  "rationale": "The filing explicitly describes future sales as conditional. The evidence strongly supports that semantic representation, but it does not establish that sales occurred or will occur.",
   "limitations": ["future_state_not_observed"],
   "reviewer": {
     "provider": "local",
@@ -89,6 +108,7 @@ Split records when they differ by:
   },
   "prompt_hash": "sha256 of system plus task prompt",
   "taxonomy_version": "version identifier",
+  "trust_policy_version": "trust-semantics-v1",
   "created_at": "2026-07-21T00:00:00Z"
 }
 ```
@@ -106,6 +126,25 @@ taxonomy_candidate
 
 `accept` recommends retaining a deterministic record. It does not authorize `status = accepted`.
 
+## Candidate reasons
+
+```text
+trust_profile_reconstruction
+attribution_ambiguity
+inference_audit
+product_lifecycle_state
+mixed_actual_estimate_risk
+potential_future_event
+relation_role_refinement
+relation_scope_missing
+contradiction_review
+disclosure_delta
+segment_comparability
+legal_remedy_decomposition
+taxonomy_candidate
+false_positive_correction
+```
+
 ## Claim classes
 
 ```text
@@ -117,6 +156,8 @@ management_interpretation
 third_party_statement
 reviewer_inference
 ```
+
+Claim class describes the financial meaning. `trust_profile.statement_attribution` describes who or what produced the statement.
 
 ## Occurrence status
 
@@ -133,78 +174,177 @@ undetermined
 not_applicable
 ```
 
-Interpretation:
+Future states require `predicate = potential_event`. Do not use confidence as an event probability.
 
-- `occurred`: the event or accounting impact explicitly happened;
-- `ongoing`: a rule, restriction, obligation, process, or state is currently in force;
-- `announced_not_occurred`: committed or announced, but not yet completed;
-- `expected_not_occurred`: management expects it, but it has not happened;
-- `conditional_potential`: may happen only if stated conditions are met;
-- `hypothetical_risk`: generic risk possibility without a specific expected event;
-- `undetermined`: evidence cannot safely establish occurrence;
-- `not_applicable`: non-event semantics such as stable taxonomy or supplier role.
+## Trust-profile enums
 
-For future/potential states, `predicate` must be:
+### Evidence integrity
 
 ```text
-potential_event
+verified
+verified_with_storage_gap
+unknown
+failed
 ```
 
-The object should preserve, when available:
+### Source authority
 
 ```text
-event_type
-affected_scope
-trigger_conditions
-expected_window
-quantitative_range
-probability_language
-issuer_commitment_level
+structured_sec_field
+inline_xbrl_or_xml
+filed_table
+filed_primary_document
+filed_exhibit
+third_party_text_embedded_in_filing
+reviewer_generated
 ```
 
-Do not invent missing probability, time, amount, or trigger.
-
-## Potential-to-occurred resolution
-
-A later filing may resolve an earlier potential event. The later record may set:
+### Statement attribution
 
 ```text
-resolves_prior_review_id = <earlier potential review ID>
+structured_sec_fact
+issuer_reported_statement
+management_estimate
+management_interpretation
+third_party_statement_in_filing
+legal_or_regulatory_assertion
+reviewer_inference
+```
+
+### Semantic directness
+
+```text
+exact_structured
+explicit_text
+normalized_explicit
+composed_explicit
+inferred
+```
+
+### Temporal eligibility
+
+```text
+eligible_datetime
+eligible_date_only
+ineligible_future
+unknown
+```
+
+### Scope fidelity
+
+```text
+exact
+bounded
+partial
+ambiguous
+not_comparable
+```
+
+### Corroboration state
+
+```text
+single_evidence
+single_information_event
+same_filing_independent_structure
+prior_filing_consistent
+cross_form_consistent
+conflicted
+not_applicable
+```
+
+### Contradiction state
+
+```text
+none
+same_time_conflict
+later_supersession
+scope_conflict
+measurement_conflict
+unresolved
+```
+
+### Economic truth status
+
+```text
+structurally_reported
+issuer_attested
+internally_corroborated
+attributed_only
+not_independently_assessed
+contradicted_by_eligible_evidence
+not_applicable
+```
+
+### Trust tier
+
+```text
+A
+B
+C
+D
+X
+```
+
+Trust tier is derived from dimensions. It must never be assigned from the numeric score alone.
+
+## Inference contract
+
+`inference_depth` must be an integer from 0 to 3:
+
+```text
+0 direct structured or explicit statement
+1 controlled normalization
+2 composition of explicit premises
+3 unstated bridge or reviewer inference
 ```
 
 Rules:
 
-1. Preserve the earlier potential record and its original availability time.
-2. Create a new `occurred` or resolution record using later evidence.
-3. Never rewrite the earlier record as though the event was already known to have occurred.
-4. A cancelled or withdrawn plan is a new resolution event, not deletion.
+- `inference_premises` must list every evidence ID used.
+- `inference_bridge` is required for depth 2 or 3.
+- Depth 3 requires challenger review and cannot be automatically promoted.
+- If the bridge is not uniquely defensible, use `no_change`.
+- Co-mention, sequence, embedding similarity, and later outcomes are not valid hidden bridges.
 
-## Candidate reasons
+## Confidence compatibility rule
 
-```text
-product_lifecycle_state
-mixed_actual_estimate_risk
-potential_future_event
-relation_role_refinement
-relation_scope_missing
-disclosure_delta
-segment_comparability
-legal_remedy_decomposition
-taxonomy_candidate
-false_positive_correction
-```
+`confidence` is retained for compatibility only.
 
-## Explicitness
-
-Use project database values only:
+It must satisfy:
 
 ```text
-explicit
-estimated
-inferred
+confidence == trust_profile.semantic_support_score
 ```
 
-Statement attribution is represented by `claim_class`, not a separate explicitness enum.
+It measures support for the exact semantic representation. It does not measure:
+
+- truthfulness of management;
+- likelihood of a future event;
+- investment conviction;
+- materiality;
+- expected return;
+- source prestige.
+
+## Corroboration rules
+
+Do not count these as independent corroboration:
+
+- duplicated wording;
+- multiple snippets from one sentence;
+- a deterministic assertion plus its own evidence;
+- an 8-K and its attached issuer press release as separate independent sources;
+- the same press release copied into several exhibits.
+
+When evidence is not independent, use `single_information_event`.
+
+## Economic truth rules
+
+- SEC filing status proves filing provenance and timing, not the objective truth of every statement.
+- A filed forecast remains `not_independently_assessed`.
+- A management causal explanation remains `management_interpretation` unless another governed layer verifies it.
+- A legal allegation is `attributed_only` until an eligible decision or order establishes a procedural outcome.
+- A structured reported value may be `structurally_reported`; do not rename it `proven_true`.
+- Later confirmation creates a new record and never retrospectively upgrades the earlier record.
 
 ## Identity and evidence rules
 
@@ -212,18 +352,17 @@ Statement attribution is represented by `claim_class`, not a separate explicitne
 - Anonymous entities stay anonymous.
 - A counterparty mentioned in one issuer's filing does not become an issuer-side fact for that counterparty.
 - `primary_evidence_id` is mandatory.
-- Corroborating evidence must be supplied and PIT-eligible.
+- Corroborating/conflicting evidence must be supplied and PIT-eligible.
 - `source_available_at` must exactly match the database.
-- Do not paste altered evidence into the output.
 - No current web or external evidence may be added in this review batch.
 
 ## Timing rules
 
 - `source_available_at <= signal_timestamp` is mandatory.
-- Date-precision evidence is invalid for intraday review.
-- `effective_from` never changes when the evidence became knowable.
-- `created_at` is review time, not source availability.
-- Later outcomes cannot influence the earlier semantic classification.
+- Date-only evidence is invalid for intraday review.
+- `effective_from` never changes when evidence became knowable.
+- Later outcomes cannot influence earlier semantic classification or trust tier.
+- PIT/integrity failure requires `trust_tier = X`.
 
 ## Action rules
 
@@ -231,45 +370,43 @@ Statement attribution is represented by `claim_class`, not a separate explicitne
 - `reject`: requires a reviewed record ID and concrete reason.
 - `supersede`: requires a reviewed record ID and corrected atomic claim.
 - `create_candidate`: requires supported predicate/object.
-- `no_change`: rationale must explain insufficient evidence.
+- `no_change`: rationale must explain insufficient evidence or non-unique inference.
 - `taxonomy_candidate`: object must include canonical label, definition, parent, aliases, and collision notes.
-
-## Confidence
-
-Confidence measures evidence-to-semantics support, not whether a potential event will occur.
-
-- New inferred claims below `0.50` are prohibited; use `no_change`.
-- Results below `0.90` require challenger review.
-- Do not use confidence as an event probability.
 
 ## Limitations
 
 Suggested labels:
 
 ```text
-anonymous_counterparty
 management_claim_unverified
+third_party_claim_only
+legal_allegation_only
+future_state_not_observed
 scope_ambiguous
-period_not_comparable
 relation_direction_uncertain
+non_independent_corroboration
+inference_bridge_required
+period_not_comparable
 unit_or_scale_uncertain
 issuer_side_evidence_missing
-future_state_not_observed
-condition_incomplete
-event_time_not_stated
+eligible_conflict_unresolved
 ```
 
 ## Batch manifest
 
 ```json
 {
-  "schema_version": "sec-llm-review-batch-v1",
+  "schema_version": "sec-llm-review-batch-v2",
   "run_id": "...",
   "batch_id": "...",
   "signal_timestamp": "...",
   "candidate_query_hash": "...",
   "candidate_reason_counts": {},
   "occurrence_status_counts": {},
+  "trust_tier_counts": {},
+  "attribution_counts": {},
+  "inference_depth_counts": {},
+  "economic_truth_status_counts": {},
   "input_assertion_count": 100,
   "input_relation_count": 10,
   "input_evidence_count": 100,
@@ -278,6 +415,7 @@ event_time_not_stated
   "model": {},
   "prompt_hash": "...",
   "taxonomy_version": "...",
+  "trust_policy_version": "trust-semantics-v1",
   "source_database_sha256": "...",
   "started_at": "...",
   "completed_at": "...",
@@ -296,21 +434,22 @@ identity_mismatch
 source_time_mismatch
 evidence_after_signal_timestamp
 intraday_date_precision_use
-invalid_enum
+missing_trust_profile
+invalid_trust_enum
+confidence_score_mismatch
+trust_tier_derived_from_score_only
+pit_or_integrity_failure_not_tier_x
+missing_inference_premise
+missing_inference_bridge
+hidden_inference_bridge
+duplicate_evidence_counted_as_independent
+sec_filing_treated_as_proof_of_economic_truth
+management_estimate_stored_as_verified_fact
+legal_allegation_stored_as_proven_fact
+unsupported_economic_truth_upgrade
+later_outcome_used_to_regrade_history
 accepted_status_emitted
-missing_candidate_reason
-missing_occurrence_status
-potential_stored_as_occurred
-occurred_stored_as_potential
-later_resolution_rewrites_prior_state
-future_amount_stored_as_actual
-condition_missing_for_conditional_event
-invented_probability
-invented_event_date
-missing_model_identity
-missing_prompt_hash
 multi_claim_record
-future_outcome_reference
 external_enrichment_used
 source_evidence_mutation
 ```
