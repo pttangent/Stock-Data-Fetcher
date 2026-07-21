@@ -16,9 +16,13 @@ R: deterministic rejection; available for review/audit but never silently promot
 
 ## Evidence grouping
 
-Multiple candidates generated from the same evidence snippet are exported as one JSONL review unit. The unit contains a `candidates` array and the LLM must return one decision row per `candidate_id`.
+Candidates with the same `issuer_id + snippet_hash` are exported as one JSONL review unit, even when the same sentence recurs across multiple 10-K or 10-Q filings. The unit contains:
 
-This reduces repeated context while preserving candidate-level auditability. Use `--no-dedupe-evidence` to return one export unit per candidate.
+- one canonical evidence sentence;
+- every filing/evidence instance with its own PIT timestamp;
+- a `candidates` array retaining each `candidate_id`, `filing_id`, `evidence_id` and `available_at`.
+
+The LLM must return one decision row per `candidate_id`. This reduces repeated context while preserving candidate-level and filing-level auditability. Use `--no-dedupe-evidence` to return one export unit per candidate.
 
 ## Export examples
 
@@ -104,4 +108,4 @@ Across the 19 supplied databases, candidate levels were:
 | D | 2,196 |
 | B/C/D total | 6,175 |
 
-Grouping by filing and `snippet_hash` reduced the B/C/D workload to about 3,713 evidence review units, roughly a 40% reduction without removing candidate-level decisions.
+Grouping by `issuer_id + snippet_hash` reduced the B/C/D workload to about 3,713 evidence review units, roughly a 40% reduction without removing candidate-level or PIT decisions.
