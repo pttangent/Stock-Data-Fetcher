@@ -33,3 +33,18 @@ jobs:
         if: steps.lint.outcome == 'failure'
         run: exit 1
       - run: pytest
+      - name: Package SEC LLM Skill
+        if: success()
+        shell: bash
+        run: |
+          zip -r sec-llm-semantic-review-skill.zip .agents/skills/sec-llm-semantic-review
+          sha256sum sec-llm-semantic-review-skill.zip > sec-llm-semantic-review-skill.sha256
+      - name: Upload SEC LLM Skill
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sec-llm-semantic-review-skill
+          path: |
+            sec-llm-semantic-review-skill.zip
+            sec-llm-semantic-review-skill.sha256
+          if-no-files-found: error
