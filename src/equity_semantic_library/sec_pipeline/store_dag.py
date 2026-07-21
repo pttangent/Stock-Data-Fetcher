@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import json
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .store_utils import canonical_json, stable_id, utc_now
@@ -25,7 +25,7 @@ class DagStoreMixin:
 
     def claim_task(self, *, run_id: str, lane: str, worker_id: str, lease_seconds: int) -> dict[str, Any] | None:
         now = utc_now()
-        expiry = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat().replace("+00:00", "Z")
+        expiry = (datetime.now(UTC) + timedelta(seconds=lease_seconds)).isoformat().replace("+00:00", "Z")
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute(
@@ -77,7 +77,7 @@ class DagStoreMixin:
         terminal = int(task.get("attempt_count", 0)) + 1 >= int(task.get("max_attempts", 1))
         status = "failed" if terminal else "pending"
         delay = min(300, 2 ** max(1, int(task.get("attempt_count", 0))))
-        not_before = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat().replace("+00:00", "Z") if not terminal else None
+        not_before = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat().replace("+00:00", "Z") if not terminal else None
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("UPDATE dag_task SET status=?,not_before=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE task_id=?", (status, not_before, f"{type(error).__name__}: {error}", now, task["task_id"]))
