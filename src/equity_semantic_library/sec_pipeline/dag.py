@@ -20,7 +20,8 @@ from .forms import (
     form_group,
     form_priority,
 )
-from .store import PipelineStore, stable_id, utc_now
+from .store import PipelineStore, WriteQueue
+from .store_utils import stable_id, utc_now
 
 
 class YahooGate:
@@ -41,7 +42,11 @@ class YahooGate:
 class DagPipeline(DagWorkerMixin):
     def __init__(self, config: PipelineConfig, *, store: PipelineStore | None = None, mode: str = "all"):
         self.config = config
-        self.store = store or PipelineStore(config.db_path)
+        self.write_queue: WriteQueue | None = None
+        if store is None:
+            self.write_queue = WriteQueue()
+            store = PipelineStore(config.db_path, write_queue=self.write_queue)
+        self.store = store
         self.store.initialize()
         self.policy = FormPolicy(config.include_forms, config.exclude_forms)
         self.mode = mode
@@ -284,6 +289,9 @@ class DagPipeline(DagWorkerMixin):
         self.stop_event.set()
         for thread in threads:
             thread.join(timeout=5)
+        if self.write_queue is not None:
+            self.write_queue.join()
+            self.write_queue.stop()
         return self.store.finish_run(run_id)
 
     def _worker_loop(self, run_id: str, lane: str, worker_id: str) -> None:

@@ -49,10 +49,14 @@ class CoreStoreMixin:
           imported_at=excluded.imported_at
         """
         payload = [{**row, "imported_at": now} for row in rows]
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.executemany(sql, payload)
-            conn.commit()
+
+        def _do(rows):
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.executemany(sql, rows)
+                conn.commit()
+
+        self._enqueue(_do, payload)
 
     def universe(self, limit: int | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM symbol_universe WHERE COALESCE(is_etf,0)=0 ORDER BY market_cap DESC NULLS LAST, rank ASC NULLS LAST, symbol"
@@ -110,36 +114,43 @@ class CoreStoreMixin:
 
     def clear_semantic_filing(self, filing_id: str) -> None:
         """Clear derived semantics while preserving parsed SEC structure and review history."""
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "DELETE FROM candidate_promotion WHERE candidate_id IN (SELECT candidate_id FROM semantic_candidate WHERE filing_id=?)",
-                (filing_id,),
-            )
-            conn.execute("DELETE FROM company_relation WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM semantic_assertion WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM semantic_candidate WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM section_semantic_context WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM event_ledger WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM evidence_snippet WHERE filing_id=?", (filing_id,))
-            conn.commit()
+
+        def _do(fid):
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "DELETE FROM candidate_promotion WHERE candidate_id IN (SELECT candidate_id FROM semantic_candidate WHERE filing_id=?)",
+                    (fid,),
+                )
+                conn.execute("DELETE FROM company_relation WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM semantic_assertion WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM semantic_candidate WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM section_semantic_context WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM event_ledger WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM evidence_snippet WHERE filing_id=?", (fid,))
+                conn.commit()
+
+        self._enqueue(_do, filing_id)
 
     def clear_parsed_filing(self, filing_id: str) -> None:
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "DELETE FROM candidate_promotion WHERE candidate_id IN (SELECT candidate_id FROM semantic_candidate WHERE filing_id=?)",
-                (filing_id,),
-            )
-            conn.execute("DELETE FROM company_relation WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM semantic_assertion WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM semantic_candidate WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM section_semantic_context WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM event_ledger WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM evidence_snippet WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM form13f_holding WHERE filing_id=?", (filing_id,))
-            conn.execute("DELETE FROM filing_document WHERE filing_id=?", (filing_id,))
-            conn.commit()
+        def _do(fid):
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "DELETE FROM candidate_promotion WHERE candidate_id IN (SELECT candidate_id FROM semantic_candidate WHERE filing_id=?)",
+                    (fid,),
+                )
+                conn.execute("DELETE FROM company_relation WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM semantic_assertion WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM semantic_candidate WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM section_semantic_context WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM event_ledger WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM evidence_snippet WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM form13f_holding WHERE filing_id=?", (fid,))
+                conn.execute("DELETE FROM filing_document WHERE filing_id=?", (fid,))
+                conn.commit()
+
+        self._enqueue(_do, filing_id)
 
     def insert_many(self, table: str, rows: list[dict[str, Any]], *, replace: bool = False) -> None:
         if not rows:
@@ -149,10 +160,14 @@ class CoreStoreMixin:
         verb = "INSERT OR REPLACE" if replace else "INSERT OR IGNORE"
         sql = f"{verb} INTO {table}({','.join(columns)}) VALUES({placeholders})"
         values = [tuple(canonical_json(row[c]) if isinstance(row[c], (dict, list)) else row[c] for c in columns) for row in rows]
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.executemany(sql, values)
-            conn.commit()
+
+        def _do(table, columns, sql, values):
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.executemany(sql, values)
+                conn.commit()
+
+        self._enqueue(_do, table, columns, sql, values)
 
     def record_filing_overflow(self, rows: list[dict[str, Any]]) -> None:
         """Record filings that were skipped because a symbol had too many filings."""
@@ -182,4 +197,21 @@ class CoreStoreMixin:
                 "reason": row.get("reason", "symbol_filing_overflow"),
                 "discovered_at": now,
             })
-        self.insert_many("filing_overflow", prepared)
+
+        def _do(rows):
+            self._insert_many_sync("filing_overflow", rows)
+
+        self._enqueue(_do, prepared)
+
+    def _insert_many_sync(self, table: str, rows: list[dict[str, Any]], *, replace: bool = False) -> None:
+        if not rows:
+            return
+        columns = list(rows[0])
+        placeholders = ",".join("?" for _ in columns)
+        verb = "INSERT OR REPLACE" if replace else "INSERT OR IGNORE"
+        sql = f"{verb} INTO {table}({','.join(columns)}) VALUES({placeholders})"
+        values = [tuple(canonical_json(row[c]) if isinstance(row[c], (dict, list)) else row[c] for c in columns) for row in rows]
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(sql, values)
+            conn.commit()

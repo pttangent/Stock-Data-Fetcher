@@ -65,12 +65,16 @@ class DagStoreMixin:
 
     def complete_task(self, task_id: str, worker_id: str, payload: dict[str, Any] | None = None) -> None:
         now = utc_now()
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            run_id = conn.execute("SELECT run_id FROM dag_task WHERE task_id=?", (task_id,)).fetchone()[0]
-            conn.execute("UPDATE dag_task SET status='completed',lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=?,last_error=NULL WHERE task_id=?", (now, now, task_id))
-            conn.execute("INSERT INTO dag_event(run_id,task_id,occurred_at,event_type,worker_id,payload_json) VALUES(?,?,?,'completed',?,?)", (run_id, task_id, now, worker_id, canonical_json(payload or {})))
-            conn.commit()
+
+        def _do(task_id, worker_id, payload):
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                run_id = conn.execute("SELECT run_id FROM dag_task WHERE task_id=?", (task_id,)).fetchone()[0]
+                conn.execute("UPDATE dag_task SET status='completed',lease_owner=NULL,lease_expires_at=NULL,updated_at=?,completed_at=?,last_error=NULL WHERE task_id=?", (now, now, task_id))
+                conn.execute("INSERT INTO dag_event(run_id,task_id,occurred_at,event_type,worker_id,payload_json) VALUES(?,?,?,'completed',?,?)", (run_id, task_id, now, worker_id, canonical_json(payload or {})))
+                conn.commit()
+
+        self._enqueue(_do, task_id, worker_id, payload)
 
     def fail_task(self, task: dict[str, Any], worker_id: str, error: Exception) -> None:
         now = utc_now()
@@ -78,12 +82,16 @@ class DagStoreMixin:
         status = "failed" if terminal else "pending"
         delay = min(300, 2 ** max(1, int(task.get("attempt_count", 0))))
         not_before = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat().replace("+00:00", "Z") if not terminal else None
-        with self.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            conn.execute("UPDATE dag_task SET status=?,not_before=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE task_id=?", (status, not_before, f"{type(error).__name__}: {error}", now, task["task_id"]))
-            conn.execute("INSERT INTO dag_event(run_id,task_id,occurred_at,event_type,worker_id,payload_json) VALUES(?,?,?,'failed',?,?)", (task["run_id"], task["task_id"], now, worker_id, canonical_json({"error_type": type(error).__name__, "message": str(error), "terminal": terminal})))
-            conn.execute("INSERT OR REPLACE INTO pipeline_issue(issue_id,run_id,task_id,symbol,accession,stage,severity,code,message,context_json,occurred_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (stable_id("issue", task["task_id"], task.get("attempt_count"), type(error).__name__, str(error)), task["run_id"], task["task_id"], task.get("symbol"), task.get("accession"), task["task_type"], "error" if terminal else "warning", type(error).__name__, str(error), canonical_json(task.get("payload", {})), now))
-            conn.commit()
+
+        def _do(task, worker_id, error, status, not_before, now):
+            with self.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("UPDATE dag_task SET status=?,not_before=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE task_id=?", (status, not_before, f"{type(error).__name__}: {error}", now, task["task_id"]))
+                conn.execute("INSERT INTO dag_event(run_id,task_id,occurred_at,event_type,worker_id,payload_json) VALUES(?,?,?,'failed',?,?)", (task["run_id"], task["task_id"], now, worker_id, canonical_json({"error_type": type(error).__name__, "message": str(error), "terminal": terminal})))
+                conn.execute("INSERT OR REPLACE INTO pipeline_issue(issue_id,run_id,task_id,symbol,accession,stage,severity,code,message,context_json,occurred_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (stable_id("issue", task["task_id"], task.get("attempt_count"), type(error).__name__, str(error)), task["run_id"], task["task_id"], task.get("symbol"), task.get("accession"), task["task_type"], "error" if terminal else "warning", type(error).__name__, str(error), canonical_json(task.get("payload", {})), now))
+                conn.commit()
+
+        self._enqueue(_do, task, worker_id, error, status, not_before, now)
 
     def cancel_blocked_tasks(self, run_id: str) -> int:
         now = utc_now()
