@@ -24,7 +24,7 @@
   "max_document_bytes": 536870912,
   "evidence_max_chars": 800,
   "xbrl_mode": "key_facts",
-  "max_filings_per_symbol": 100,
+  "max_filings_per_symbol": 200,
   "task_max_attempts": 3,
   "task_lease_seconds": 900,
   "scheduler_poll_seconds": 0.2,
