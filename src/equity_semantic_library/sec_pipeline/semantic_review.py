@@ -8,7 +8,7 @@ from typing import Any
 from .semantic_records import promote_candidate
 from .store import PipelineStore, canonical_json, stable_id, utc_now
 
-REVIEW_CONTRACT_VERSION = "sec-semantic-review-v2"
+REVIEW_CONTRACT_VERSION = "sec-semantic-review-v3"
 _ALLOWED_DECISIONS = {"accept", "reject", "change", "ambiguous"}
 _DEFAULT_LEVELS = ("B", "C", "D", "R")
 _DEFAULT_STATUSES = ("rule_accepted", "review_required", "rejected")
@@ -54,7 +54,7 @@ def export_review_queue(
         buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
         order: list[tuple[str, str]] = []
         for row in rows:
-            key = (row["filing_id"], row["snippet_hash"])
+            key = (row["issuer_id"], row["snippet_hash"])
             if key not in buckets:
                 buckets[key] = []
                 order.append(key)
@@ -77,7 +77,7 @@ def export_review_queue(
                 "contract_version": REVIEW_CONTRACT_VERSION,
                 "review_unit_id": stable_id(
                     "review-unit",
-                    first["filing_id"],
+                    first["issuer_id"],
                     first["snippet_hash"],
                     *sorted(row["candidate_id"] for row in group),
                 ),
@@ -90,20 +90,29 @@ def export_review_queue(
                         if item
                     ],
                 },
-                "filing": {
-                    "filing_id": first["filing_id"],
-                    "accession": first.get("accession"),
-                    "form": first.get("form"),
-                    "base_form": first.get("base_form"),
-                    "report_date": first.get("report_date"),
-                    "available_at": first["available_at"],
-                    "item": first.get("item"),
-                    "title": first.get("title"),
-                    "section_role": first["section_role"],
-                },
+                "filing_instances": [
+                    {
+                        "filing_id": row["filing_id"],
+                        "accession": row.get("accession"),
+                        "form": row.get("form"),
+                        "base_form": row.get("base_form"),
+                        "report_date": row.get("report_date"),
+                        "available_at": row["available_at"],
+                        "item": row.get("item"),
+                        "title": row.get("title"),
+                        "section_role": row["section_role"],
+                    }
+                    for row in {
+                        item["filing_id"]: item
+                        for item in group
+                    }.values()
+                ],
                 "candidates": [
                     {
                         "candidate_id": row["candidate_id"],
+                        "filing_id": row["filing_id"],
+                        "evidence_id": row["evidence_id"],
+                        "available_at": row["available_at"],
                         "candidate_type": row["candidate_type"],
                         "predicate": row["predicate"],
                         "object": json.loads(row["object_json"]),
@@ -119,14 +128,29 @@ def export_review_queue(
                     for row in group
                 ],
                 "evidence": {
-                    "evidence_id": first["evidence_id"],
                     "snippet": first["snippet"],
                     "snippet_hash": first["snippet_hash"],
-                    "source_sha256": first["source_sha256"],
-                    "accepted_at": first.get("accepted_at"),
-                    "available_at": first["available_at"],
-                    "observed_at": first.get("observed_at"),
+                    "instance_count": len(
+                        {
+                            row["evidence_id"]
+                            for row in group
+                        }
+                    ),
                 },
+                "evidence_instances": [
+                    {
+                        "evidence_id": row["evidence_id"],
+                        "filing_id": row["filing_id"],
+                        "source_sha256": row["source_sha256"],
+                        "accepted_at": row.get("accepted_at"),
+                        "available_at": row["available_at"],
+                        "observed_at": row.get("observed_at"),
+                    }
+                    for row in {
+                        item["evidence_id"]: item
+                        for item in group
+                    }.values()
+                ],
                 "allowed_output": {
                     "one_decision_per_candidate": True,
                     "decision": ["accept", "reject", "change", "ambiguous"],
