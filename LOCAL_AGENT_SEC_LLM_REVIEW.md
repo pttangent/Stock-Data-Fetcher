@@ -1,4 +1,4 @@
-# Local Agent Instruction — SEC Trust-Semantic Review
+# Local Agent Instruction — SEC Trust and Promotion Review
 
 ## Working boundary
 
@@ -21,18 +21,19 @@ This branch is based on:
 Raise batch filing cap from 100 to 200
 ```
 
-Do not edit the source metadata parquet, raw SEC evidence, filing identity, XBRL facts, tables, evidence snippets, hashes, timestamps, or existing accepted assertions.
+Do not edit the source metadata parquet, raw SEC evidence, filing identity, XBRL facts, tables, evidence snippets, hashes, timestamps, or accepted deterministic records.
 
-The LLM stage is not a second parser, a filing summarizer, or an investment analyst. It reviews only selected semantic residue and reconstructs the **meaning of trust** for each claim.
+The LLM stage is not a parser, filing summarizer, or investment analyst. It reviews only routed semantic residue.
 
-## Mandatory Skill files
+## Mandatory files
 
-Read in this order:
+Read in order:
 
 ```text
 .agents/skills/sec-llm-semantic-review/SKILL.md
 .agents/skills/sec-llm-semantic-review/references/PIT_POLICY.md
 .agents/skills/sec-llm-semantic-review/references/TRUST_SEMANTICS_POLICY.md
+.agents/skills/sec-llm-semantic-review/references/LLM_ROUTING_POLICY.md
 .agents/skills/sec-llm-semantic-review/references/FINANCIAL_SEMANTIC_POLICY.md
 .agents/skills/sec-llm-semantic-review/references/POTENTIAL_EVENT_POLICY.md
 .agents/skills/sec-llm-semantic-review/references/REVIEW_OUTPUT_CONTRACT.md
@@ -41,46 +42,170 @@ Read in this order:
 .agents/skills/sec-llm-semantic-review/assets/llm_review_record.schema.json
 ```
 
-Candidate queries:
+Routing queries:
 
 ```text
+.agents/skills/sec-llm-semantic-review/assets/select_llm_routing_candidates.sql
 .agents/skills/sec-llm-semantic-review/assets/select_trust_review_candidates.sql
-.agents/skills/sec-llm-semantic-review/assets/select_review_candidates.sql
 .agents/skills/sec-llm-semantic-review/assets/select_potential_event_candidates.sql
 ```
 
-## Core trust principle
+## Two independent axes
 
-Never answer “Is this trustworthy?” with one number.
-
-For each selected claim, distinguish:
+Never conflate:
 
 ```text
-1. Evidence trust
-   Is the source authentic, hash-verified, traceable, and PIT-eligible?
+promotion_level
+  deterministic admission and LLM-routing state
 
-2. Semantic trust
-   Does the source support this exact subject-predicate-object representation?
-
-3. Economic truth
-   Does this project independently know the underlying economic statement is true?
+trust_tier
+  epistemic quality of one reviewed semantic representation
 ```
 
-Examples:
+A management estimate may have:
 
 ```text
-A filed forecast can be:
-- evidence_integrity = verified
-- semantic_support_score = 0.97
-- economic_truth_status = not_independently_assessed
-- trust_tier = C
+promotion_level = C
+semantic_support_score = 0.97
+trust_tier = C
+economic_truth_status = not_independently_assessed
 ```
 
-This means we are highly confident that management made the forecast and that the semantic extraction is faithful. It does not mean the forecast has a 97% chance of occurring.
+That means the evidence strongly supports “management made this estimate.” It does not imply a 97% event probability.
+
+## Promotion routing contract
+
+```text
+A  -> formal library; 0% normal LLM
+B  -> formal library; replayable 1%-5% audit, higher for configured high-impact relations
+C  -> review_required; 100% mandatory by evidence group
+D1 -> grouped mandatory review
+D2 -> aggregate, deduplicate, rank, then review within budget
+D3 -> retain evidence; no default LLM
+R  -> deterministic rejection; replayable 0.1%-1% rejection-rule audit
+```
+
+Never create a queue equivalent to:
+
+```sql
+WHERE promotion_level != 'A'
+```
+
+### A
+
+Do not send to LLM. A requires structured or fully constrained deterministic evidence.
+
+### B
+
+Already admitted to the formal library. LLM is an audit, not a rewrite stage.
+
+Expected audit outcome:
+
+```text
+no_change
+or
+keep_formal_B
+```
+
+A B audit may recommend a change only with concrete subject, direction, role, scope, polarity, attribution, or PIT evidence and must route to challenger review.
+
+### C
+
+Review every eligible evidence group. Typical reasons:
+
+- pronoun/passive binding;
+- several companies in one sentence;
+- relation direction or role ambiguity;
+- product/segment/geography scope ambiguity;
+- negation, condition, plan, estimate, or future tense;
+- issuer versus third-party attribution;
+- actual/estimate/risk/interpretation decomposition.
+
+### D1
+
+Review every deduplicated high-value evidence group, including:
+
+- 10-K Item 1, Item 1A, Item 7;
+- 10-Q risk or MD&A;
+- supplier/customer/competitor/investment/foundry/action language;
+- issuer-first-person language;
+- quantified context;
+- resolved listed or governed important entity;
+- repeated high-value target across filings.
+
+### D2
+
+Do not review row by row. Aggregate and prioritize by:
+
+```text
+issuer
++ target entity
++ section role
++ normalized sentence hash
++ fiscal quarter/year bucket
+```
+
+Preserve every source evidence ID and PIT time.
+
+### D3
+
+No default review. Examples:
+
+- proxy biography former employers;
+- offering underwriter lists;
+- legal definitions;
+- signature pages;
+- trademarks, addresses, email domains;
+- references or reproduced news text;
+- context-free ticker/name tables.
+
+### R
+
+No normal review. Audit only a small deterministic sample by rejection rule version.
+
+A false-rejection finding creates:
+
+```text
+promotion_recommendation = rule_regression_candidate
+```
+
+It does not directly admit the record.
+
+## Evidence group is the request unit
+
+One LLM request must contain one governed evidence sentence/snippet and every candidate generated from it.
+
+Stable group material:
+
+```text
+issuer_id
++ filing_id/accession
++ section_id or section_role
++ normalized evidence sentence hash
+```
+
+Example request:
+
+```json
+{
+  "evidence_group_id": "stable-id",
+  "issuer": "AMD",
+  "form": "10-K",
+  "section_role": "issuer_risk",
+  "primary_evidence_id": "evidence-id",
+  "candidate_ids": ["candidate-1", "candidate-2"],
+  "mentioned_entities": ["Intel", "NVIDIA"],
+  "candidate_topics": ["competition", "customer_concentration"]
+}
+```
+
+The model may return several atomic decisions, but every JSONL record must reference the same `evidence_group_id` and relevant candidate IDs.
+
+Never send the same sentence once for Intel, once for NVIDIA, and once per topic.
 
 ## Mandatory trust profile
 
-Every JSONL record must include:
+Every output record requires:
 
 ```text
 evidence_integrity
@@ -99,38 +224,15 @@ semantic_support_score
 trust_tier
 ```
 
-Compatibility rule:
+Compatibility invariant:
 
 ```text
 confidence == trust_profile.semantic_support_score
 ```
 
-`confidence` is not truth probability, event probability, investment conviction, materiality, or expected return.
+Confidence is not truth probability, event probability, investment conviction, materiality, or expected return.
 
-## SEC authority boundary
-
-SEC provenance is authoritative for:
-
-- filing identity;
-- issuer/CIK as filed;
-- accession and form;
-- acceptance/public availability time;
-- submitted structured fields and attached documents;
-- what the issuer or attributed party stated.
-
-SEC filing status does not automatically prove:
-
-- management estimates will occur;
-- management causal explanations are objectively correct;
-- legal allegations are true;
-- risk disclosures are realized;
-- a product mention means shipment or revenue;
-- a 13F holding implies partnership, control, or endorsement;
-- a named company has the exact commercial role inferred by the reviewer.
-
-## Review workflow
-
-### 1. Preflight
+## Preflight
 
 ```powershell
 cd D:\DEV\AnotherNetworkFactory\SEC_Yfinance_Fetcher
@@ -143,19 +245,24 @@ esl-sec --config .\config\sec_pipeline.local.json validate `
   --output .\reports\pre-llm-validation.json
 ```
 
-Do not begin LLM review unless deterministic validation passes.
+Do not begin review unless deterministic validation passes.
 
-### 2. Freeze the batch
+## Freeze and record the batch
 
-Set:
+Record:
 
 ```text
 signal_timestamp
 run_id
 batch_id
-candidate_reason
-candidate SQL text
-candidate SQL SHA-256
+promotion policy version = promotion-routing-v1
+promotion-level population counts
+promotion-level selected counts
+LLM-route counts
+evidence-group count
+candidate-row count
+deduplicated count
+candidate SQL and SHA-256
 source database SHA-256
 model/version/temperature
 prompt SHA-256
@@ -163,44 +270,71 @@ taxonomy version
 trust policy version = trust-semantics-v1
 ```
 
-Use only evidence with:
+For B/R samples also record:
+
+```text
+rule ID/version
+sample rate
+sample seed or deterministic hash rule
+population count
+sample count
+strata
+sample reason
+```
+
+Sampling must be replayable.
+
+## Select and build queues
+
+Use:
+
+```text
+select_llm_routing_candidates.sql
+```
+
+The scheduler must:
+
+1. exclude A;
+2. select a deterministic B audit sample rather than the full B population;
+3. include all eligible C evidence groups;
+4. group D by evidence before any call;
+5. include all deduplicated D1 groups;
+6. rank/deduplicate D2 before budget selection;
+7. exclude D3 by default;
+8. select only a stratified R rule-audit sample.
+
+## Semantic review workflow
+
+### 1. Verify routing and evidence
+
+Require:
+
+```text
+input_promotion_level
+llm_route
+evidence_group_id
+candidate_ids
+section_role
+rule ID/version
+source SHA-256
+source_available_at
+```
+
+Reject invalid route/group membership before semantic reasoning.
+
+### 2. Freeze PIT
+
+Use only:
 
 ```text
 source_available_at <= signal_timestamp
 ```
 
-Date-only evidence is not eligible for intraday signals.
+Date-only evidence is not intraday eligible. Later filings, prices, returns, news, and outcomes are forbidden.
 
-### 3. Select a narrow queue
+### 3. Identify attribution
 
-Start with:
-
-```text
-select_trust_review_candidates.sql
-```
-
-Do not send the whole database to the LLM. Review only records selected because of:
-
-```text
-trust_profile_reconstruction
-attribution_ambiguity
-inference_audit
-product_lifecycle_state
-mixed_actual_estimate_risk
-potential_future_event
-relation_role_refinement
-relation_scope_missing
-contradiction_review
-disclosure_delta
-segment_comparability
-legal_remedy_decomposition
-taxonomy_candidate
-false_positive_correction
-```
-
-### 4. Reconstruct attribution
-
-Choose exactly one:
+Choose:
 
 ```text
 structured_sec_fact
@@ -212,51 +346,46 @@ legal_or_regulatory_assertion
 reviewer_inference
 ```
 
-Do not convert attributed or alleged content into issuer-observed fact.
+SEC provenance proves what was filed, not that every forecast, explanation, allegation, or risk is objectively true.
 
-### 5. Audit inference
-
-Use:
+### 4. Audit inference
 
 ```text
-inference_depth = 0 direct structured/explicit
-inference_depth = 1 controlled normalization
-inference_depth = 2 composition of explicit premises
-inference_depth = 3 unstated bridge/reviewer inference
+0 direct structured/explicit
+1 controlled normalization
+2 composition of explicit premises
+3 unstated bridge/reviewer inference
 ```
 
-For depth 2 or 3:
+For depth 2/3:
 
 - list every premise evidence ID;
-- write the bridge rule explicitly;
+- write the bridge explicitly;
 - require challenger review;
-- use `no_change` if another reasonable bridge exists.
+- use `no_change` when another reasonable bridge exists.
 
-Prohibited hidden bridges:
+Forbidden hidden bridges:
 
 - co-mention;
 - same industry;
 - temporal sequence;
 - embedding similarity;
-- later stock-price reaction;
+- later stock response;
 - later filing outcome;
-- outside knowledge not present in the governed batch.
+- external knowledge outside the batch.
 
-### 6. Assess corroboration correctly
+### 5. Assess corroboration
 
-These are not independent corroboration:
+These are one information event, not independent corroboration:
 
-- repeated wording in one filing;
-- multiple snippets from one sentence;
-- one deterministic assertion and its source evidence;
-- an 8-K and its attached issuer press release;
-- the same release copied into several exhibits.
+- repeated wording;
+- several snippets from one sentence;
+- several candidates generated from one sentence;
+- a deterministic candidate and its source evidence;
+- an 8-K and attached issuer press release;
+- copies of the same release across exhibits.
 
-Use `single_information_event` for these cases.
-
-### 7. Separate occurred and potential
-
-Every event-like record requires one:
+### 6. Separate occurred and potential
 
 ```text
 occurred
@@ -275,11 +404,9 @@ Future states use:
 predicate = potential_event
 ```
 
-A later actual event is a new record linked through `resolves_prior_review_id`. Never rewrite the earlier potential state.
+A later actual event creates a new record linked through `resolves_prior_review_id`. Never rewrite the earlier state.
 
-### 8. Assess economic truth conservatively
-
-Allowed values:
+### 7. Assess economic truth conservatively
 
 ```text
 structurally_reported
@@ -291,32 +418,48 @@ contradicted_by_eligible_evidence
 not_applicable
 ```
 
-Do not emit `proven_true`, `verified_true`, or equivalent labels.
+Do not emit `verified_true` or `proven_true`.
 
-### 9. Derive trust tier
+### 8. Derive trust tier
 
 ```text
-A = structurally verified and semantically direct
-B = explicit issuer/official assertion; economic truth may remain issuer-attested
-C = estimate, interpretation, attributed/legal statement, potential event, bounded composition
-D = reviewer inference, ambiguous scope/direction, unresolved material conflict
-X = evidence-integrity or PIT failure; unusable
+A structurally verified and semantically direct
+B explicit issuer/official assertion; may remain issuer-attested
+C estimate, interpretation, attributed/legal statement, potential event, bounded composition
+D inference, ambiguous scope/direction, unresolved material conflict
+X integrity/PIT failure
 ```
 
-A high semantic score does not force Tier A or B.
+Trust tier is not promotion level.
 
-### 10. Write append-only output
+### 9. Recommend promotion
 
-Directory:
+Allowed:
 
 ```text
-data/sec_yfinance/reviews/<RUN_ID>/<BATCH_ID>/
+keep_formal_B
+promote_candidate_to_B
+retain_C_or_D_review
+reject_to_R
+rule_regression_candidate
+no_change
 ```
 
-Required files:
+The LLM cannot mint A.
+
+Promotion from C/D to B and any proposed change to B require challenger review and later validator/human approval.
+
+## Output
+
+Write:
 
 ```text
-records.jsonl
+data/sec_yfinance/reviews/<RUN_ID>/<BATCH_ID>/records.jsonl
+```
+
+Also write:
+
+```text
 manifest.json
 candidate_query.sql
 candidate_query.sha256
@@ -324,133 +467,101 @@ validation.json
 challenger_records.jsonl   # when required
 ```
 
-Every record must conform to:
+Validate every line against:
 
 ```text
 .agents/skills/sec-llm-semantic-review/assets/llm_review_record.schema.json
 ```
 
-All new or corrected records remain:
+All new/corrected records remain:
 
 ```text
 status = review_required
 ```
 
-## First controlled trust-review sequence
+## Controlled company examples
 
-### Batch 1 — MU lifecycle trust
+### MU
 
-Review:
+- HBM4 sample delivery may be deterministic B or C depending on extraction completeness.
+- Sampling occurred does not imply volume production.
+- Repeated product mentions are not corroboration.
 
-```text
-HBM4 samples delivered
-HBM4 volume production implication
-HBM3E production/ramp statements
-```
+### AMD
 
-Expected reasoning:
+- Explicit “rely on TSMC for wafer production” may be B and sampled, not mandatory LLM.
+- MI308 paragraph is C because actual charge, rule, license status, and future conditional sales must be separated.
+- A multi-company competition sentence is reviewed once as C/D1, not once per company.
 
-```text
-Sample delivery may be Tier B issuer-attested occurred sampling.
-It does not support volume production.
-Repeated product mentions are not corroboration.
-```
+### AVGO
 
-### Batch 2 — AMD MI308 trust decomposition
+- Compensation-plan adoption and future target achievement are separate.
+- Proxy biography employer mentions route D3.
+- Anonymous customer concentration never receives guessed identities.
 
-Separate:
+### NVDA
 
-```text
-recorded charge amount
-management explanation of the charge
-export-license rule
-licenses reportedly granted
-future China sales conditional on demand/rules/licenses
-```
+- Earlier H20 estimate and later actual are separate historical states.
+- Supply-chain co-mentions do not establish role without explicit direction/scope.
 
-Expected reasoning:
+### GOOGL
 
-```text
-Structured/reported amount may be Tier A/B.
-Management explanation is a separate interpretation.
-Future sales can have high semantic support but remain Tier C potential.
-Do not relabel charge as lost revenue without explicit evidence.
-```
+- Court decision/order may be issuer/official procedural fact.
+- Allegations remain attributed.
+- Future implementation/financial effect remains potential unless realized.
 
-### Batch 3 — AMD/TSMC relation trust
+### META
 
-Review independently:
+- Llama strategy may be management interpretation.
+- Do not infer monetization, causality, or revenue materiality.
 
-```text
-source issuer
-counterparty identity
-relation direction
-foundry role
-product/process scope
-current versus planned state
-```
+### AMZN
 
-Do not create TSM issuer-side facts from AMD evidence.
+- Exact 13F rows bypass LLM as A.
+- Only incomplete identity normalization enters review.
+- Never infer commercial or strategic relations from holdings.
 
-### Batch 4 — AVGO trust semantics
+## Challenger requirements
 
-Review:
+Require an independent challenger when:
 
-```text
-VCF product hierarchy
-anonymous customer concentration
-AI Revenue PSU plan adoption
-future target achievement
-```
-
-Plan adoption may be occurred governance fact. Target achievement remains conditional potential and is not ordinary revenue guidance.
-
-### Batch 5 — NVDA temporal trust
-
-Review:
-
-```text
-earlier H20 expected charge
-later H20 recorded charge
-supply-chain role decomposition
-```
-
-Both filings can be trustworthy records of their own historical states. The later actual does not upgrade the earlier estimate at the earlier timestamp.
-
-### Batch 6 — GOOGL/META/AMZN attribution trust
-
-```text
-GOOGL: decision/order versus allegation and future financial effect
-META: Llama strategy as management interpretation, not monetization fact
-AMZN: 13F reported holding only; no commercial or strategic inference
-```
-
-## Mandatory challenger review
-
-Require a separate challenger when:
-
-- inference_depth >= 2;
-- a named supplier/customer/foundry/government/competitor is involved;
-- contradiction_state is not `none`;
-- economic truth is upgraded beyond `issuer_attested` without structured corroboration;
-- potential changes to occurred or resolves a prior record;
+- inference depth >= 2;
+- a B audit proposes a change;
+- C/D is recommended for B promotion;
+- a named high-impact relation is not deterministic B;
+- contradiction state is not `none`;
+- potential becomes occurred or resolves a prior record;
 - actual/guidance, GAAP basis, segment, period, unit, or scale changes;
-- a material graph relation is Tier C or D;
+- economic truth is upgraded beyond issuer-attested without structured corroboration;
+- an R audit finds possible over-rejection;
 - taxonomy affects multiple issuers.
 
 The creator cannot approve its own candidate.
 
-## Hard failure conditions
+## Hard failures
 
-Reject the entire batch when any is non-zero:
+Reject the batch for:
 
 ```text
+all_non_A_sent_to_llm
+A_sent_without_explicit_qa
+B_population_sent_without_sampling
+B_sampling_not_replayable
+C_eligible_group_skipped
+D_candidate_row_used_as_request_unit
+D1_not_grouped
+D2_not_deduplicated
+D3_sent_by_default
+R_used_as_normal_review_queue
+R_sampling_not_replayable
+promotion_level_confused_with_trust_tier
+llm_directly_mints_A
+missing_evidence_group_id
+candidate_group_membership_mismatch
 missing_trust_profile
 confidence_score_mismatch
 trust_tier_derived_from_score_only
 sec_filing_treated_as_proof_of_economic_truth
-management_estimate_stored_as_verified_fact
-legal_allegation_stored_as_proven_fact
 duplicate_evidence_counted_as_independent
 hidden_inference_bridge
 unsupported_economic_truth_upgrade
@@ -462,13 +573,14 @@ accepted_status_emitted
 
 ## Completion
 
-The stage is complete only when:
+Complete only when:
 
-- deterministic source records are unchanged;
-- every review record is atomic and replayable;
+- routing, grouping, deduplication, and sampling are replayable;
+- all eligible C/D1 groups are accounted for;
+- deterministic source rows remain unchanged;
+- every output is atomic and references its evidence group/candidate IDs;
 - every trust dimension is populated;
-- attribution, inference premises, and bridge are explicit;
-- evidence independence is assessed correctly;
+- attribution, inference premises, and bridges are explicit;
 - historical PIT states are preserved;
 - Schema validation passes;
 - manifest counts reconcile;
