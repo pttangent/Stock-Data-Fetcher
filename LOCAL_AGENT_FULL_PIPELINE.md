@@ -113,6 +113,55 @@ esl-sec --config .\config\sec_pipeline.local.json validate `
   --output .\reports\full-pipeline-validation.json
 ```
 
+## Post-pipeline LLM semantic review
+
+The LLM review step is optional and occurs only after deterministic parsing, semantic extraction, and validation pass.
+
+Before reviewing any assertion, load:
+
+```text
+.agents/skills/sec-llm-semantic-review/SKILL.md
+```
+
+Then read all referenced policy files under:
+
+```text
+.agents/skills/sec-llm-semantic-review/references/
+```
+
+The LLM may review only:
+
+- assertions marked `review_required` or selected by an explicit audit query;
+- ambiguous products, aliases, relation directions, relation types, risks, events, disclosure deltas, and taxonomy candidates;
+- exact short evidence already present in `evidence_snippet`;
+- evidence whose governed availability is not later than the frozen `signal_timestamp`.
+
+The LLM must not:
+
+- parse raw filings again;
+- recalculate or replace XBRL/table facts;
+- inspect future filings, amendments, prices, returns, or later outcomes;
+- guess anonymous customer or supplier identities;
+- turn 13F holdings into supplier/customer/partnership claims;
+- write directly to authoritative tables or emit an accepted database status;
+- delete, rewrite, or shorten stored evidence.
+
+Write review output as append-only JSONL following:
+
+```text
+.agents/skills/sec-llm-semantic-review/references/REVIEW_OUTPUT_CONTRACT.md
+```
+
+Recommended path:
+
+```text
+data/sec_yfinance/reviews/<RUN_ID>/<BATCH_ID>.jsonl
+```
+
+Each line must contain one atomic claim, one primary `evidence_id`, unchanged source availability time, model identity, prompt hash, confidence, limitations, and `status = review_required`.
+
+A later deterministic validator or human reviewer may promote a correction. The LLM itself may only recommend `accept`, `reject`, `supersede`, `create_candidate`, `no_change`, or `taxonomy_candidate`.
+
 ## Non-negotiable controls
 
 - Never include Forms 3, 4, 5 or 144 unless the user explicitly changes policy.
@@ -122,3 +171,4 @@ esl-sec --config .\config\sec_pipeline.local.json validate `
 - Do not allow yfinance to overwrite SEC CIK or legal identity.
 - Do not delete or rewrite source evidence after LLM review. Corrections must supersede assertions while retaining `evidence_id` and original PIT timestamps.
 - Stop and report if `pipeline_issue` contains SHA mismatch, missing availability time, or database integrity failures.
+- Reject any LLM review batch containing future evidence, date-precision evidence used intraday, identity mismatch, source-time mutation, accepted-status output, missing prompt hash, or future-outcome reasoning.
