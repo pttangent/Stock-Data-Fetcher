@@ -14,5 +14,6 @@ data/raw/
 data/cache/
 data/exports/
 data/sec_yfinance/
+data/batches/
 reports/
 config/sec_pipeline.local.json

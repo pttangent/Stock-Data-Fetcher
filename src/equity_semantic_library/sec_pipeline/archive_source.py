@@ -143,6 +143,12 @@ class SecClient:
             try:
                 with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
                     payload = response.read(self.config.max_document_bytes + 1)
+                    encoding = response.headers.get("Content-Encoding", "").lower()
+                    if encoding == "gzip":
+                        payload = gzip.decompress(payload)
+                    elif encoding == "deflate":
+                        import zlib
+                        payload = zlib.decompress(payload)
                     if len(payload) > self.config.max_document_bytes:
                         raise ValueError(f"SEC payload exceeds max_document_bytes: {url}")
                     return payload, {
