@@ -90,6 +90,31 @@ def export_review_queue(
                         if item
                     ],
                 },
+                "candidate_id": first["candidate_id"],
+                "candidate": {
+                    "candidate_type": first["candidate_type"],
+                    "predicate": first["predicate"],
+                    "object": json.loads(first["object_json"]),
+                    "confidence": first["confidence"],
+                    "promotion_level": first["promotion_level"],
+                    "status": first["status"],
+                    "subject_binding": first["subject_binding"],
+                    "polarity": first["polarity"],
+                    "modality": first["modality"],
+                    "rule_id": first["rule_id"],
+                    "rejection_reason": first.get("rejection_reason"),
+                },
+                "filing": {
+                    "filing_id": first["filing_id"],
+                    "accession": first.get("accession"),
+                    "form": first.get("form"),
+                    "base_form": first.get("base_form"),
+                    "report_date": first.get("report_date"),
+                    "available_at": first["available_at"],
+                    "item": first.get("item"),
+                    "title": first.get("title"),
+                    "section_role": first["section_role"],
+                },
                 "filing_instances": [
                     {
                         "filing_id": row["filing_id"],
@@ -128,8 +153,13 @@ def export_review_queue(
                     for row in group
                 ],
                 "evidence": {
+                    "evidence_id": first["evidence_id"],
                     "snippet": first["snippet"],
                     "snippet_hash": first["snippet_hash"],
+                    "source_sha256": first["source_sha256"],
+                    "accepted_at": first.get("accepted_at"),
+                    "available_at": first["available_at"],
+                    "observed_at": first.get("observed_at"),
                     "instance_count": len(
                         {
                             row["evidence_id"]
@@ -162,6 +192,7 @@ def export_review_queue(
             handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
     return {
         "output": str(path),
+        "count": candidate_count,
         "review_units": len(grouped),
         "candidate_count": candidate_count,
         "contract_version": REVIEW_CONTRACT_VERSION,
