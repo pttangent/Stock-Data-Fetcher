@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-EXTRACTOR_VERSION = "deterministic-sec-semantics-v3"
+EXTRACTOR_VERSION = "deterministic-sec-semantics-v4"
 
 TOPICS: dict[str, tuple[str, tuple[str, ...]]] = {
     "ai_accelerators": ("technology", (r"\bGPU(?:s)?\b", r"AI accelerator", r"accelerated computing", r"\bTPU(?:s)?\b")),
@@ -118,7 +118,15 @@ STRICT_RELATION_PATTERNS: dict[str, tuple[str, ...]] = {
 }
 
 LOOSE_RELATION_TERMS: dict[str, tuple[str, ...]] = {
-    "supplier_or_manufacturer": (r"\brely\b", r"\bsupplier", r"\bmanufacturer", r"\bfoundr"),
+    "supplier_or_manufacturer": (
+        r"\brely\b",
+        r"\bsupplier",
+        r"\bmanufactur(?:e|es|ed|ing|er)",
+        r"\bfabricat(?:e|es|ed|ing)",
+        r"\bproduc(?:e|es|ed|ing)\b.{0,80}\bwafers?\b",
+        r"\bfoundr",
+        r"\bcontract manufacturers?",
+    ),
     "customer_or_channel": (r"\bcustomer", r"\bdistributor", r"channel partner", r"\bsales to\b", r"\brevenue from\b"),
     "competitor": (r"\bcompete", r"\bcompetitor", r"competition from"),
     "partner_or_collaborator": (r"\bpartner", r"\bcollaborat", r"\balliance"),
