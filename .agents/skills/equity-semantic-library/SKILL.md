@@ -32,6 +32,16 @@ description: Build and validate a structured, point-in-time-safe public-equity s
 - Research use requires `available_at <= signal_timestamp`.
 - Never infer supplier/customer relations during ingestion.
 
+## Post-filing review routing
+
+When deterministic extraction is complete but a product, relation, risk, event, disclosure delta, entity alias, or taxonomy label remains ambiguous, stop using this ingestion skill and load:
+
+```text
+.agents/skills/sec-llm-semantic-review/SKILL.md
+```
+
+That reviewer is append-only, evidence-ID-bound, PIT-gated, and is not authorized to rewrite source evidence or directly accept new database facts.
+
 ## Commands
 
 ```bash
