@@ -12,13 +12,12 @@ This repository intentionally does **not** ask an LLM to invent business segment
 ## Reliability rules
 
 1. SEC identity is required and must contain a real contact email.
-2. SEC traffic defaults to 5 requests/second, below the SEC's published 10 requests/second ceiling.
-3. Annual filing selection accepts only exact `10-K`, `20-F` and `40-F`, then chooses the most recent base annual report; amendments are never promoted as the base filing.
-4. EdgarTools is attempted first for filing text; the official SEC archive is the deterministic fallback.
-5. `available_at` comes from SEC `acceptanceDateTime`, falling back to `filingDate` with recorded date precision.
-6. yfinance is sequential, cached for 24 hours by default and retried. Empty responses are errors, never accepted records.
-7. Every write uses stable IDs/upserts. Re-running the same source payload does not duplicate records.
-8. Raw source payloads and filing text are retained outside Git and linked by hashes.
+2. SEC traffic is kept below the SEC ceiling through a process-wide request-start gate shared by all download workers.
+3. `available_at` comes from SEC `acceptanceDateTime`, falling back to `filingDate` with recorded date precision.
+4. yfinance is supplemental observation data and never overwrites SEC CIK or legal identity.
+5. Every write uses stable IDs/upserts. Re-running the same source payload does not duplicate records.
+6. Raw SEC complete submissions are retained outside Git, compressed, hashed and linked to structured rows.
+7. Short evidence retains source SHA-256, SEC acceptance time, local observation time and extractor version.
 
 ## Install
 
@@ -29,64 +28,69 @@ pip install -e ".[dev,parquet]"
 cp .env.example .env
 ```
 
-Export the SEC identity in your shell (or load `.env` using your preferred environment manager):
+Export the SEC identity in your shell:
 
 ```bash
 export SEC_IDENTITY="Your Name your.email@example.com"
 ```
 
-## Quick start
+## Original single-symbol library
 
 ```bash
-# Initialize
 esl --db data/equity_semantic.db init
-
-# Optional: preload SEC ticker map and nightly submissions archive for large universes
 esl --data-dir data bootstrap-sec --bulk-submissions
-
-# Ingest symbols using SEC + yfinance
 esl --db data/equity_semantic.db ingest AAPL MSFT BRK.B
-
-# Ignore fresh caches and fetch again
-esl --db data/equity_semantic.db ingest AAPL --refresh
-
-# Ingest the first 100 rows from CSV/Parquet
-esl --db data/equity_semantic.db ingest-file symbol_metadata.parquet \
-  --symbol-column symbol --limit 100
-
-# Validate and export
 esl --db data/equity_semantic.db validate --output reports/validation.json
-esl --db data/equity_semantic.db export security reports/security.csv
 ```
 
-For Yahoo-only development (records remain provisional and validation will not release the run):
-
-```bash
-esl ingest AAPL --no-sec
-```
-
-## Structured output
-
-Core tables:
-
-- `issuer`: stable issuer identity, using `issuer:sec:<10-digit CIK>` when available.
-- `security`: symbol-level security linked to an issuer.
-- `source_record`: immutable raw API snapshots with hashes and observation time.
-- `company_profile_snapshot`: normalized yfinance fields plus untouched raw JSON.
-- `source_document`: one row per SEC accession number.
-- `filing_section`: exact filing text chunks with offsets and hashes.
-- `ingestion_error`: retryable/non-retryable failure audit trail.
-- `work_queue` and `ingestion_run`: resumable run state.
-- `semantic_fact` and `company_relation`: evidence-backed extension tables for later L1–L5 processing.
+Core tables include `issuer`, `security`, `source_record`, `company_profile_snapshot`, `source_document`, `filing_section`, `ingestion_error`, `work_queue`, `ingestion_run`, `semantic_fact`, and `company_relation`.
 
 See [docs/SCHEMA.md](docs/SCHEMA.md) and [docs/SOURCE_POLICY.md](docs/SOURCE_POLICY.md).
 
+## Multi-worker SEC/Yfinance pipeline
+
+The integrated production pipeline is a separate database and data tree. It reads the local metadata file without modifying it, schedules companies by descending market capitalization, and dynamically creates accession-level tasks:
+
+```text
+discover/download -> form-specific parse -> form-specific semantic extraction
+```
+
+Forms 3, 4, 5 and 144 are excluded by default. Separate worker lanes handle annual/quarterly filings, 8-K events, 13F holdings, proxy/regulatory/offering documents, semantic extraction, Yahoo observations and finalization. Multiple SEC workers share one global rate gate.
+
+Windows setup:
+
+```powershell
+Copy-Item .\config\sec_pipeline.example.json .\config\sec_pipeline.local.json
+$env:SEC_IDENTITY = "Stock-Data-Fetcher your-real-email@example.com"
+
+esl-sec --config .\config\sec_pipeline.local.json init
+esl-sec --config .\config\sec_pipeline.local.json run
+```
+
+Offline MU/archive replay:
+
+```powershell
+esl-sec --config .\config\sec_pipeline.local.json import-archive `
+  "D:\PATH\TO\ticker=MU.zip"
+```
+
+Monitor and resume:
+
+```powershell
+esl-sec --config .\config\sec_pipeline.local.json status <RUN_ID>
+esl-sec --config .\config\sec_pipeline.local.json resume <RUN_ID>
+esl-sec --config .\config\sec_pipeline.local.json validate --output .\reports\validation.json
+```
+
+Read [docs/SEC_YFINANCE_DAG_PIPELINE.md](docs/SEC_YFINANCE_DAG_PIPELINE.md), [docs/MU_SEC_DAG_VALIDATION_20260721.md](docs/MU_SEC_DAG_VALIDATION_20260721.md), and [LOCAL_AGENT_FULL_PIPELINE.md](LOCAL_AGENT_FULL_PIPELINE.md).
+
 ## Tests
 
-Unit tests are offline and use fake SEC/Yahoo responses:
+Unit tests are offline and use synthetic SEC/Yahoo responses:
 
 ```bash
 pytest
+python -m compileall -q src
 ```
 
 Live network tests should be opt-in and marked `integration`.
