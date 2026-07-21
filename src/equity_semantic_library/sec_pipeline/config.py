@@ -51,6 +51,7 @@ class PipelineConfig:
     evidence_max_chars: int = 800
     xbrl_mode: str = "key_facts"
     max_filings_per_symbol: int | None = None
+    per_symbol_db: bool = False
     workers: WorkerConfig = field(default_factory=WorkerConfig)
     task_max_attempts: int = 3
     task_lease_seconds: int = 900
