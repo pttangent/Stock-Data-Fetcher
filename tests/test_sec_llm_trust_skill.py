@@ -69,7 +69,7 @@ def test_skill_rejects_single_score_truth_semantics() -> None:
         "economic_truth_status",
         "semantic_support_score",
         "confidence == semantic_support_score",
-        "SEC filing status proves filing provenance and timing",
+        "An SEC filing is authoritative evidence",
     ]
     combined = f"{skill}\n{policy}"
     for phrase in required_phrases:
@@ -83,9 +83,7 @@ def test_trust_candidate_sql_is_read_only_and_pit_bounded() -> None:
         assert mutation not in upper
     assert ":signal_timestamp" in sql
     assert "trust_profile_reconstruction" in sql
-    assert "single_information_event" in (
-        SKILL_ROOT / "references" / "TRUST_SEMANTICS_POLICY.md"
-    ).read_text(encoding="utf-8")
+    assert "single_information_event" in TRUST_POLICY_PATH.read_text(encoding="utf-8")
 
 
 def test_local_agent_documents_point_to_trust_branch() -> None:
