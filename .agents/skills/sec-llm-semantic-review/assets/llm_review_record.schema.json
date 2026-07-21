@@ -23,6 +23,7 @@
     "source_available_at_precision",
     "action",
     "claim_class",
+    "occurrence_status",
     "subject_key",
     "explicitness",
     "confidence",
@@ -41,10 +42,12 @@
     "batch_id": {"type": "string", "minLength": 1},
     "reviewed_assertion_id": {"type": ["string", "null"]},
     "reviewed_relation_id": {"type": ["string", "null"]},
+    "resolves_prior_review_id": {"type": ["string", "null"]},
     "candidate_reason": {
       "enum": [
         "product_lifecycle_state",
         "mixed_actual_estimate_risk",
+        "potential_future_event",
         "relation_role_refinement",
         "relation_scope_missing",
         "disclosure_delta",
@@ -90,6 +93,18 @@
         "management_interpretation",
         "third_party_statement",
         "reviewer_inference"
+      ]
+    },
+    "occurrence_status": {
+      "enum": [
+        "occurred",
+        "ongoing",
+        "announced_not_occurred",
+        "expected_not_occurred",
+        "conditional_potential",
+        "hypothetical_risk",
+        "undetermined",
+        "not_applicable"
       ]
     },
     "subject_key": {"type": "string", "minLength": 1},
@@ -147,6 +162,24 @@
     {
       "if": {"properties": {"action": {"enum": ["supersede", "create_candidate"]}}},
       "then": {"required": ["predicate", "object"]}
+    },
+    {
+      "if": {
+        "properties": {
+          "occurrence_status": {
+            "enum": [
+              "announced_not_occurred",
+              "expected_not_occurred",
+              "conditional_potential",
+              "hypothetical_risk"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {"predicate": {"const": "potential_event"}},
+        "required": ["predicate", "object"]
+      }
     }
   ]
 }
