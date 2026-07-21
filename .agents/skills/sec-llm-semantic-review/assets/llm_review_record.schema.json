@@ -9,6 +9,7 @@
     "review_id",
     "run_id",
     "batch_id",
+    "candidate_reason",
     "primary_evidence_id",
     "corroborating_evidence_ids",
     "security_id",
@@ -39,6 +40,20 @@
     "run_id": {"type": "string", "minLength": 1},
     "batch_id": {"type": "string", "minLength": 1},
     "reviewed_assertion_id": {"type": ["string", "null"]},
+    "reviewed_relation_id": {"type": ["string", "null"]},
+    "candidate_reason": {
+      "enum": [
+        "product_lifecycle_state",
+        "mixed_actual_estimate_risk",
+        "relation_role_refinement",
+        "relation_scope_missing",
+        "disclosure_delta",
+        "segment_comparability",
+        "legal_remedy_decomposition",
+        "taxonomy_candidate",
+        "false_positive_correction"
+      ]
+    },
     "primary_evidence_id": {"type": "string", "minLength": 1},
     "corroborating_evidence_ids": {
       "type": "array",
@@ -80,7 +95,7 @@
     "subject_key": {"type": "string", "minLength": 1},
     "predicate": {"type": ["string", "null"]},
     "object": {"type": ["object", "null"]},
-    "explicitness": {"enum": ["explicit", "attributed", "inferred"]},
+    "explicitness": {"enum": ["explicit", "estimated", "inferred"]},
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "status": {"const": "review_required"},
     "effective_from": {"type": ["string", "null"], "format": "date-time"},
@@ -122,7 +137,12 @@
   "allOf": [
     {
       "if": {"properties": {"action": {"enum": ["accept", "reject", "supersede"]}}},
-      "then": {"required": ["reviewed_assertion_id"]}
+      "then": {
+        "anyOf": [
+          {"required": ["reviewed_assertion_id"]},
+          {"required": ["reviewed_relation_id"]}
+        ]
+      }
     },
     {
       "if": {"properties": {"action": {"enum": ["supersede", "create_candidate"]}}},
