@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
+from collections.abc import Iterable
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from .store import PipelineStore, canonical_json, stable_id, utc_now
 from .taxonomy import (
