@@ -71,7 +71,7 @@ def _polarity_modality(sentence: str, relation_start: int) -> tuple[str, str]:
     return polarity, modality
 
 
-def _strict_relation(sentence: str, entity_start: int) -> tuple[str | None, int | None]:
+def _strict_relation(sentence: str, entity_start: int, entity_end: int) -> tuple[str | None, int | None]:
     best: tuple[int, str, int] | None = None
     for relation_type, patterns in COMPILED_STRICT_RELATIONS:
         for pattern in patterns:
@@ -79,7 +79,34 @@ def _strict_relation(sentence: str, entity_start: int) -> tuple[str | None, int 
                 distance = entity_start - match.end()
                 if 0 <= distance <= 220 and (best is None or distance < best[0]):
                     best = (distance, relation_type, match.start())
-    return (best[1], best[2]) if best else (None, None)
+    if best:
+        return best[1], best[2]
+
+    # Semiconductor filings often disclose explicit issuer relationships in
+    # passive form, such as "our manufacturing is outsourced to ... TSMC" or
+    # "TSMC, one of our CMs, manufactured our wafers". These statements bind
+    # the named entity to the filing issuer even without an active "we" verb.
+    prefix = sentence[max(0, entity_start - 280):entity_start]
+    suffix = sentence[entity_end:min(len(sentence), entity_end + 220)]
+    passive_before = re.search(
+        r"(?i)\bour\b.{0,200}\b(?:is|are|was|were)\s+"
+        r"(?:outsourced|subcontracted|manufactured|fabricated|produced)\s+"
+        r"(?:to|by)\b.{0,100}\b(?:including|such as)?\s*$",
+        prefix,
+    )
+    issuer_owned_after = re.search(
+        r"(?i)^\s*(?:\([^)]*\))?\s*,?\s*"
+        r"(?:one of )?our\s+(?:CMs|contract manufacturers?|suppliers?|foundries)\b",
+        suffix,
+    )
+    manufactures_for_issuer = re.search(
+        r"(?i)^.{0,100}\b(?:manufactur(?:es|ed)|fabricat(?:es|ed)|produc(?:es|ed))\b"
+        r".{0,120}\b(?:our|for us)\b",
+        suffix,
+    )
+    if passive_before or issuer_owned_after or manufactures_for_issuer:
+        return "supplier_or_manufacturer", entity_start
+    return None, None
 
 
 def _loose_relation(sentence: str) -> str | None:
@@ -173,7 +200,7 @@ def extract_topics_and_concepts(
                 entity_match = next((found for pattern in patterns if (found := pattern.search(sentence))), None)
                 if not entity_match:
                     continue
-                strict_type, relation_start = _strict_relation(sentence, entity_match.start())
+                strict_type, relation_start = _strict_relation(sentence, entity_match.start(), entity_match.end())
                 relation_type = strict_type or loose_type
                 self_target = _self_target(store, filing, entity_name, ticker)
                 subject_bound = strict_type is not None
