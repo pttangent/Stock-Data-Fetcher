@@ -2,16 +2,24 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import hashlib
+from pathlib import Path
 import re
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from .archive import GlobalRateGate, SecArchive, SecClient, inventory_archive, load_symbol_metadata, sha256_file
 from .config import PipelineConfig
 from .dag_workers import DagWorkerMixin
-from .forms import LANE_BY_TASK, PARSE_TASK_BY_GROUP, FormPolicy, base_form, form_group, form_priority
+from .forms import (
+    LANE_BY_TASK,
+    PARSE_TASK_BY_GROUP,
+    SEMANTIC_TASK_BY_GROUP,
+    FormPolicy,
+    base_form,
+    form_group,
+    form_priority,
+)
 from .store import PipelineStore, stable_id, utc_now
 
 
@@ -71,8 +79,13 @@ class DagPipeline(DagWorkerMixin):
         return self.sec_archive
 
     def create_online_run(
-        self, *, metadata_path: str | Path | None = None, limit: int | None = None,
-        refresh: bool = False, use_yahoo: bool = True,
+        self,
+        *,
+        metadata_path: str | Path | None = None,
+        limit: int | None = None,
+        refresh: bool = False,
+        use_yahoo: bool = True,
+        rebuild_semantic: bool = False,
     ) -> str:
         path = Path(metadata_path or self.config.symbol_metadata_path)
         rows = load_symbol_metadata(path, limit=limit)
@@ -84,53 +97,113 @@ class DagPipeline(DagWorkerMixin):
             dependencies: list[str] = []
             if self.mode in ("all", "download"):
                 discover = self.store.schedule_task(
-                    run_id=run_id, task_type="discover_company", lane="download", priority=priority,
-                    symbol=row["symbol"], payload={"refresh": refresh, "market_cap": row.get("market_cap"), "rank": row.get("rank")},
+                    run_id=run_id,
+                    task_type="discover_company",
+                    lane="download",
+                    priority=priority,
+                    symbol=row["symbol"],
+                    payload={"refresh": refresh, "market_cap": row.get("market_cap"), "rank": row.get("rank")},
                     max_attempts=self.config.task_max_attempts,
                 )
                 dependencies.append(discover)
                 if use_yahoo:
                     self.store.schedule_task(
-                        run_id=run_id, task_type="fetch_yahoo", lane="yahoo", priority=priority + 1,
-                        symbol=row["symbol"], payload={"refresh": refresh}, max_attempts=self.config.task_max_attempts,
+                        run_id=run_id,
+                        task_type="fetch_yahoo",
+                        lane="yahoo",
+                        priority=priority + 1,
+                        symbol=row["symbol"],
+                        payload={"refresh": refresh},
+                        max_attempts=self.config.task_max_attempts,
                         dependencies=[discover],
                     )
             self.store.schedule_task(
-                run_id=run_id, task_type="finalize_symbol", lane="finalize", priority=priority + 999,
-                symbol=row["symbol"], dependencies=dependencies, max_attempts=1,
+                run_id=run_id,
+                task_type="finalize_symbol",
+                lane="finalize",
+                priority=priority + 999,
+                symbol=row["symbol"],
+                dependencies=dependencies,
+                max_attempts=1,
             )
         if self.mode == "structure":
-            self._schedule_structure_tasks(run_id)
+            self._schedule_structure_tasks(run_id, rebuild_semantic=rebuild_semantic)
         return run_id
 
-    def _schedule_structure_tasks(self, run_id: str) -> None:
-        """Create parse/semantic tasks for filings already downloaded in a previous run."""
+    def _schedule_structure_tasks(self, run_id: str, *, rebuild_semantic: bool = False) -> None:
+        """Schedule only local parse/semantic work; never contact SEC in structure mode."""
+        statuses = ["downloaded", "parsed"]
+        if rebuild_semantic:
+            statuses.append("structured")
+        placeholders = ",".join("?" for _ in statuses)
         filings = self.store.query(
-            "SELECT * FROM filing WHERE status IN ('downloaded','parsed') AND form_group IS NOT NULL"
+            f"SELECT * FROM filing WHERE status IN ({placeholders}) AND form_group IS NOT NULL",
+            tuple(statuses),
         )
-        symbol_parse_tasks: dict[str, list[str]] = {}
+        symbol_terminal_tasks: dict[str, list[str]] = {}
         for filing in filings:
             group = filing["form_group"]
-            parse_task = PARSE_TASK_BY_GROUP.get(group)
-            if not parse_task:
+            semantic_task = SEMANTIC_TASK_BY_GROUP.get(group)
+            if not semantic_task:
                 continue
-            task_id = self.store.schedule_task(
-                run_id=run_id, task_type=parse_task, lane=LANE_BY_TASK[parse_task],
-                priority=0, symbol=filing["symbol"], cik=filing["cik"],
-                accession=filing["accession"], form=filing["form"],
-                payload={"filing_id": filing["filing_id"], "expected_sha256": filing["raw_sha256"]},
-                max_attempts=self.config.task_max_attempts,
-            )
-            symbol_parse_tasks.setdefault(filing["symbol"], []).append(task_id)
-        for symbol, deps in symbol_parse_tasks.items():
+            priority = form_priority(filing["form"])
+            if filing["status"] == "downloaded":
+                parse_task = PARSE_TASK_BY_GROUP.get(group)
+                if not parse_task:
+                    continue
+                parse_id = self.store.schedule_task(
+                    run_id=run_id,
+                    task_type=parse_task,
+                    lane=LANE_BY_TASK[parse_task],
+                    priority=priority,
+                    symbol=filing["symbol"],
+                    cik=filing["cik"],
+                    accession=filing["accession"],
+                    form=filing["form"],
+                    payload={"filing_id": filing["filing_id"], "expected_sha256": filing["raw_sha256"]},
+                    max_attempts=self.config.task_max_attempts,
+                )
+                semantic_id = self.store.schedule_task(
+                    run_id=run_id,
+                    task_type=semantic_task,
+                    lane=LANE_BY_TASK[semantic_task],
+                    priority=priority + 100,
+                    symbol=filing["symbol"],
+                    cik=filing["cik"],
+                    accession=filing["accession"],
+                    form=filing["form"],
+                    payload={"filing_id": filing["filing_id"], "reset_semantics": False},
+                    max_attempts=self.config.task_max_attempts,
+                    dependencies=[parse_id],
+                )
+            else:
+                semantic_id = self.store.schedule_task(
+                    run_id=run_id,
+                    task_type=semantic_task,
+                    lane=LANE_BY_TASK[semantic_task],
+                    priority=priority,
+                    symbol=filing["symbol"],
+                    cik=filing["cik"],
+                    accession=filing["accession"],
+                    form=filing["form"],
+                    payload={"filing_id": filing["filing_id"], "reset_semantics": True},
+                    max_attempts=self.config.task_max_attempts,
+                )
+            symbol_terminal_tasks.setdefault(filing["symbol"], []).append(semantic_id)
+        for symbol, dependencies in symbol_terminal_tasks.items():
             self.store.schedule_task(
-                run_id=run_id, task_type="finalize_symbol", lane="finalize", priority=999,
-                symbol=symbol, dependencies=deps, max_attempts=1,
+                run_id=run_id,
+                task_type="finalize_symbol",
+                lane="finalize",
+                priority=999,
+                symbol=symbol,
+                dependencies=dependencies,
+                max_attempts=1,
             )
 
     def create_archive_run(self, archives: list[str | Path], *, symbol: str | None = None) -> str:
         source_hash = hashlib.sha256()
-        paths = [Path(p).resolve() for p in archives]
+        paths = [Path(path).resolve() for path in archives]
         for path in paths:
             source_hash.update(path.as_posix().encode())
             source_hash.update(sha256_file(path).encode())
@@ -144,7 +217,10 @@ class DagPipeline(DagWorkerMixin):
                 if not cik.strip("0"):
                     cik = f"offline-{stable_id(filing_symbol)[:10]}"
                 issuer_id, security_id = self.store.upsert_identity(
-                    symbol=filing_symbol, cik=cik, legal_name=metadata.get("companyName"), metadata=metadata
+                    symbol=filing_symbol,
+                    cik=cik,
+                    legal_name=metadata.get("companyName"),
+                    metadata=metadata,
                 )
                 form = str(metadata.get("form") or "").upper()
                 group = form_group(form)
@@ -154,22 +230,40 @@ class DagPipeline(DagWorkerMixin):
                 available_at = metadata.get("acceptanceDateTime") or metadata.get("filingDate") or utc_now()
                 precision = "datetime" if metadata.get("acceptanceDateTime") else "date"
                 filing_id = self.store.upsert_filing({
-                    "issuer_id": issuer_id, "security_id": security_id, "symbol": filing_symbol, "cik": cik,
-                    "accession": accession, "form": form, "base_form": base_form(form), "form_group": group,
-                    "filing_date": metadata.get("filingDate"), "report_date": metadata.get("reportDate"),
-                    "accepted_at": metadata.get("acceptanceDateTime"), "available_at": available_at,
-                    "available_at_precision": precision, "primary_document": metadata.get("primaryDocument"),
+                    "issuer_id": issuer_id,
+                    "security_id": security_id,
+                    "symbol": filing_symbol,
+                    "cik": cik,
+                    "accession": accession,
+                    "form": form,
+                    "base_form": base_form(form),
+                    "form_group": group,
+                    "filing_date": metadata.get("filingDate"),
+                    "report_date": metadata.get("reportDate"),
+                    "accepted_at": metadata.get("acceptanceDateTime"),
+                    "available_at": available_at,
+                    "available_at_precision": precision,
+                    "primary_document": metadata.get("primaryDocument"),
                     "source_url": metadata.get("completeSubmissionUrl") or metadata.get("filingIndexUrl") or str(path),
-                    "raw_storage_uri": item["storage_uri"], "raw_sha256": item.get("expected_sha256"),
-                    "raw_bytes": None, "compressed_bytes": path.stat().st_size,
-                    "retrieved_at": metadata.get("updatedAt") or utc_now(), "status": "downloaded",
+                    "raw_storage_uri": item["storage_uri"],
+                    "raw_sha256": item.get("expected_sha256"),
+                    "raw_bytes": None,
+                    "compressed_bytes": path.stat().st_size,
+                    "retrieved_at": metadata.get("updatedAt") or utc_now(),
+                    "status": "downloaded",
                     "metadata": {**metadata, "source_archive": str(path), "expected_sha256": item.get("expected_sha256")},
                 })
                 parse_task = PARSE_TASK_BY_GROUP[group]
                 priority = archive_index * 1_000_000 + filing_index * 1000 + form_priority(form)
                 self.store.schedule_task(
-                    run_id=run_id, task_type=parse_task, lane=LANE_BY_TASK[parse_task], priority=priority,
-                    symbol=filing_symbol, cik=cik, accession=accession, form=form,
+                    run_id=run_id,
+                    task_type=parse_task,
+                    lane=LANE_BY_TASK[parse_task],
+                    priority=priority,
+                    symbol=filing_symbol,
+                    cik=cik,
+                    accession=accession,
+                    form=form,
                     payload={"filing_id": filing_id, "expected_sha256": item.get("expected_sha256")},
                     max_attempts=self.config.task_max_attempts,
                 )
@@ -194,7 +288,12 @@ class DagPipeline(DagWorkerMixin):
 
     def _worker_loop(self, run_id: str, lane: str, worker_id: str) -> None:
         while not self.stop_event.is_set():
-            task = self.store.claim_task(run_id=run_id, lane=lane, worker_id=worker_id, lease_seconds=self.config.task_lease_seconds)
+            task = self.store.claim_task(
+                run_id=run_id,
+                lane=lane,
+                worker_id=worker_id,
+                lease_seconds=self.config.task_lease_seconds,
+            )
             if task is None:
                 if self.store.pending_count(run_id) == 0:
                     return
