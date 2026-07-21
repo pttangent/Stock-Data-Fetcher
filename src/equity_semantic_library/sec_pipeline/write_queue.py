@@ -8,18 +8,25 @@ contend for SQLite write locks.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import queue
 import threading
-from typing import Any, Callable
+from typing import Any
 
 
 class WriteQueue:
     """Thread-safe queue that serializes database writes on a single thread."""
 
     def __init__(self) -> None:
-        self._queue: queue.Queue[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]] = queue.Queue()
+        self._queue: queue.Queue[
+            tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]
+        ] = queue.Queue()
         self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True, name="sqlite-writer")
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name="sqlite-writer",
+        )
         self._thread.start()
 
     def put(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
