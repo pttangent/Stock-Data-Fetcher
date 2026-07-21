@@ -1,215 +1,291 @@
 ---
 name: sec-llm-semantic-review
-description: Review and correct deterministic SEC semantic assertions after structured ingestion while preserving point-in-time availability, source evidence, financial meaning, and append-only audit history. Use for ambiguous products, relations, risks, events, disclosure deltas, entity resolution, and taxonomy proposals. Do not use for raw filing parsing, XBRL extraction, unsupported investment advice, or rewriting source evidence.
+description: Review only the ambiguous semantic residue left after the project's deterministic SEC pipeline has parsed and structured filings. Use for product lifecycle, relation-role refinement, actual-versus-estimate decomposition, risk realization, disclosure deltas, segment comparability, legal remedies, and controlled taxonomy candidates. Do not use for raw parsing, XBRL/table extraction, generic summaries, external enrichment, or investment advice.
 license: MIT
 compatibility: Requires the Stock-Data-Fetcher SEC/Yfinance structured SQLite database and Python 3.11+.
 metadata:
   author: pttangent
-  version: "2026.07.21"
+  version: "2026.07.21-project-cases-v2"
 ---
 
 # SEC LLM Semantic Review
 
 ## Purpose
 
-This skill is a **post-processing reviewer**, not a primary extractor. The deterministic pipeline remains authoritative for filing identity, document splitting, Item/section boundaries, tables, XBRL facts, 8-K Item events, 13F holdings, hashes, and timestamps.
+This skill is a **narrow post-processing reviewer** for the semantic residue that deterministic extraction cannot safely resolve.
 
-The LLM may review ambiguity and propose corrections, but it must never replace, delete, or silently mutate source evidence or deterministic accepted assertions.
+The deterministic pipeline remains authoritative for:
+
+- filing identity, form, accession, report date, acceptance time, and governed availability;
+- document and attachment splitting;
+- Item/section boundaries;
+- tables and XBRL facts;
+- 8-K Item event family;
+- 13F holdings;
+- source hashes, offsets, and stored short evidence.
+
+The LLM must not re-read the raw filing as an unconstrained document, regenerate facts already structured, or produce a general company report. It reviews selected database evidence only.
 
 ## Required reading
 
-Before performing any review, read:
+Before every review batch, read:
 
 1. `docs/SEC_YFINANCE_DAG_PIPELINE.md`
 2. `docs/SOURCE_POLICY.md`
 3. `references/PIT_POLICY.md`
 4. `references/FINANCIAL_SEMANTIC_POLICY.md`
 5. `references/REVIEW_OUTPUT_CONTRACT.md`
+6. `references/UPLOADED_ARCHIVE_CASEBOOK.md`
 
-If reviewing a new taxonomy or relation class, also read `references/EXTERNAL_SKILL_REVIEW.md` to understand which public-skill patterns were adopted and rejected.
+Use `assets/select_review_candidates.sql` to build a narrow candidate batch. Use `assets/review_batch_prompt.md` as the local-agent prompt template. Machine-readable output must conform to `assets/llm_review_record.schema.json`.
+
+## Actual archive scope
+
+The casebook currently covers uploaded and processed archives for:
+
+```text
+MU, AMD, AVGO, NVDA, AMZN, GOOGL, META
+```
+
+A standalone AAPL or TSM archive was not present in the validated upload set. TSM may be reviewed only as a counterparty explicitly described by AMD or NVIDIA. Do not create TSM issuer-side facts until a TSM archive is imported.
 
 ## Activation boundary
 
-Use this skill only when at least one of the following is true:
+Activate this skill only when a selected record requires one of these decisions:
 
-- a deterministic assertion is `review_required`, low-confidence, contradictory, or likely a false positive;
-- an entity alias, product family, relation direction, relation type, or product scope is ambiguous;
-- a filing contains difficult narrative semantics not represented by XBRL or fixed rules;
-- the task is to compare two PIT-eligible disclosures and classify the semantic delta;
-- the task is to propose a taxonomy addition without automatically accepting it;
-- the task is to explain why a deterministic assertion should be accepted, rejected, or superseded.
+1. **Product lifecycle** — sampling, qualification, launch, volume production, shipment, ramp, majority of shipments, phase-out, or roadmap state.
+2. **Mixed claim decomposition** — one evidence window contains actual facts, estimates, rules, risks, and management interpretation.
+3. **Relation refinement** — a generic relation is explicit but needs precise direction, role, product scope, process scope, or dependency scope.
+4. **Disclosure delta** — two comparable PIT-eligible filings need `new`, `removed`, `intensified`, `de_intensified`, `unchanged`, `wording_only`, or `not_comparable` classification.
+5. **Segment/accounting comparability** — reporting structure, retrospective recast, GAAP/non-GAAP basis, segment scope, or period basis changed.
+6. **Legal/regulatory meaning** — an event needs separation of rule, remedy, obligation, realized impact, estimate, and unresolved uncertainty.
+7. **Taxonomy governance** — a product family, generation, alias, platform hierarchy, or relation class needs a controlled candidate.
+8. **False-positive correction** — self-relation, co-mention relation, wrong subject, wrong direction, duplicated claim, or overstated scope.
 
 Do not activate for:
 
-- parsing raw SEC SGML, HTML, XML, Inline XBRL, tables, or attachments;
-- re-extracting values already available in `xbrl_fact` or `filing_table`;
-- reading every filing merely to produce a generic company summary;
-- generating BUY/SELL/HOLD recommendations or price targets;
-- using Forms 3, 4, 5, or 144 unless the user explicitly changes the form policy;
-- importing current web knowledge into a historical PIT review without a separately timestamped external evidence record.
+- raw SGML, HTML, XML, Inline XBRL, table, or attachment parsing;
+- facts already available in `xbrl_fact`, `filing_table`, `event_ledger`, or `form13f_holding`;
+- simple topic or product-name mentions without ambiguity;
+- generic whole-filing summaries;
+- Forms 3, 4, 5, or 144 under the current policy;
+- current-web enrichment or later news;
+- BUY/SELL/HOLD, price targets, expected returns, alpha labels, or valuation conclusions.
 
-## Inputs
+## Candidate selection gate
 
-Operate on database records, never on an ungoverned text dump. A review unit must include:
+Do not send all assertions to the LLM. A review unit must come from an explicit candidate query and satisfy at least one condition:
 
-- `signal_timestamp` or `as_of`;
-- `security_id`, `symbol`, and `issuer_id`;
+```text
+status = review_required
+confidence < configured threshold
+explicitness = estimated or inferred
+generic relation lacks product/role scope
+product lifecycle language coexists with a known product
+actual/guidance/risk classes coexist in one evidence window
+comparable prior filing exists and delta review was requested
+segment/accounting scope changed
+governance validator flagged the record
+```
+
+Everything else bypasses the LLM.
+
+## Required inputs
+
+Each review unit must include:
+
+- frozen `signal_timestamp` or `as_of`;
+- `security_id`, `issuer_id`, and symbol;
 - `filing_id`, accession, form, and `available_at`;
-- one primary `evidence_id` and its exact short snippet;
-- optional deterministic `assertion_id` being reviewed;
+- one primary `evidence_id` and stored short snippet;
 - section title, Item, and source SHA-256;
-- any prior PIT-eligible comparison evidence explicitly supplied by the orchestrator.
+- optional deterministic `assertion_id` or `relation_id` being reviewed;
+- only explicitly selected PIT-eligible comparison evidence.
 
-Reject the task as incomplete if the primary evidence cannot be traced to an existing `evidence_snippet` row.
+Reject the unit if the primary evidence cannot be traced to `evidence_snippet`.
 
 ## Review workflow
 
-### 1. Freeze the PIT universe
+### 1. Freeze PIT
 
-- Set `signal_timestamp` before reading evidence.
-- Use only evidence whose governed usable time is not later than `signal_timestamp`.
-- Do not inspect later filings, later amendments, later news, future prices, or later taxonomy labels.
-- Record the IDs of every evidence row actually used.
+- Fix `signal_timestamp` before reading evidence.
+- Use only database evidence with governed availability at or before that timestamp.
+- Do not inspect later filings, amendments, prices, returns, outcomes, or later taxonomy states.
+- Record every evidence ID used.
 
 ### 2. Classify the source statement
 
-Assign exactly one source-statement class:
+Choose exactly one:
 
-- `reported_fact`: issuer reports an actual historical fact;
-- `management_estimate`: estimate, outlook, target, or guidance;
-- `risk_hypothesis`: conditional or hypothetical risk disclosure;
-- `policy_or_rule`: law, regulation, license condition, accounting policy, or contractual rule;
-- `management_interpretation`: management's explanation or causal narrative;
-- `third_party_statement`: quoted, attributed, or described statement by another party;
-- `reviewer_inference`: conclusion not explicitly stated in the evidence.
+- `reported_fact`
+- `management_estimate`
+- `risk_hypothesis`
+- `policy_or_rule`
+- `management_interpretation`
+- `third_party_statement`
+- `reviewer_inference`
 
-Never convert a risk hypothesis into a realized event, or a management interpretation into an independently verified fact.
+Never turn a hypothetical risk into a realized event or a management explanation into independently verified truth.
 
-### 3. Apply form-specific financial logic
+### 3. Apply form-specific logic
 
-- **10-K / 20-F / 40-F:** business model, products, segments, supply chain, competition, concentration, commitments, annual risks.
-- **10-Q:** quarter-specific change, updated risk, MD&A, liquidity, working capital, inventory, guidance changes.
-- **8-K / 6-K:** event type is anchored to Item code and filing availability; exhibits may contain earnings releases or agreements.
-- **13F-HR:** a reported holding or investment relation only; never infer supplier, customer, partnership, control, or endorsement.
-- **Proxy:** governance, compensation, voting proposal, board, auditor, and related-party semantics.
-- **SD / CORRESP / UPLOAD:** regulatory process, conflict-minerals process, SEC comment/response, or disclosure commitment.
-- **S-1 / S-3 / S-4 / 424B* / FWP:** financing instrument, offering structure, use of proceeds, dilution, distribution, and deal terms.
+- **10-K / 20-F / 40-F:** business, products, segments, supply chain, competition, concentration, commitments, annual risks.
+- **10-Q:** quarter change, updated risk, MD&A, liquidity, working capital, inventory, segment restatement, guidance change.
+- **8-K / 6-K:** Item code remains authoritative; review only event decomposition and financial meaning.
+- **13F-HR:** identifier/alias normalization and position-state description only; no commercial relation or trade-timing inference.
+- **Proxy:** governance, compensation metric, voting proposal, board, auditor, related party.
+- **SD / CORRESP / UPLOAD:** regulatory process, conflict minerals, SEC comment/response, disclosure commitment.
+- **S-1 / S-3 / S-4 / 424B* / FWP:** instrument, offering structure, proceeds, dilution, distribution, and deal terms.
 
-### 4. Decide the review action
+### 4. Decide one action
 
 Choose exactly one:
 
-- `accept`: deterministic assertion is supported as written;
-- `reject`: assertion is unsupported, misdirected, duplicated, self-referential, or semantically wrong;
-- `supersede`: preserve the original assertion and propose a corrected replacement;
-- `create_candidate`: propose a new assertion from supplied evidence;
-- `no_change`: evidence is insufficient or ambiguity cannot be resolved safely;
-- `taxonomy_candidate`: propose a new product/topic/entity alias or relation class for later governance review.
+- `accept`
+- `reject`
+- `supersede`
+- `create_candidate`
+- `no_change`
+- `taxonomy_candidate`
 
-The LLM must not directly create an `accepted` database assertion. New or corrected claims remain `review_required` until deterministic validation or human approval.
+The LLM may recommend but cannot directly write an `accepted` database fact. All new or corrected claims remain `review_required` until deterministic validation or human approval.
 
-### 5. Produce one atomic claim per record
+### 5. Emit atomic claims
 
-A record must express one subject-predicate-object claim. Split mixed sentences into separate records when they contain different relations, periods, products, or confidence levels.
+One JSONL line must express one subject-predicate-object claim with one primary evidence record.
 
-Examples:
+Split by:
 
-- acceptable: `NVDA --depends_on_foundry--> TSMC`, product scope `advanced GPU wafers`;
-- separate claim: `NVDA --depends_on_packaging_capacity--> CoWoS`;
-- unacceptable combined claim: `NVDA relies on TSMC, Samsung, memory vendors, packaging and Asian suppliers`.
+- different counterparties;
+- different relation roles;
+- different products or generations;
+- actual versus estimate;
+- current state versus future risk;
+- different reporting periods or segment scopes.
 
-### 6. Run contradiction and comparability checks
+Example:
 
-Before returning a correction:
+```text
+AMD --foundry_for--> TSMC
+product_scope = HPC, FPGA, Adaptive SoC wafer production
+```
 
-- compare like form, section, reporting scope, period, currency, unit, and accounting basis;
-- distinguish consolidated from segment disclosure;
-- distinguish point-in-time balances from period flows;
-- distinguish actual results from guidance and non-GAAP measures;
-- classify disclosure changes as `new`, `removed`, `intensified`, `de_intensified`, `unchanged`, or `wording_only`;
-- do not treat absence as removal unless the comparison section has equivalent scope.
+Do not combine TSMC, GlobalFoundries, UMC, and Samsung into one supplier assertion.
 
-### 7. Emit the governed review record
+### 6. Run comparability and contradiction checks
 
-Follow `references/REVIEW_OUTPUT_CONTRACT.md` exactly. Output JSONL only when the orchestrator requests machine-readable review records. Never write directly into source evidence tables.
+Before returning a result:
 
-## Evidence hierarchy
+- compare like form, section, period, currency, unit, accounting basis, and segment scope;
+- distinguish balance-sheet stocks from period flows;
+- distinguish actual values from estimates, targets, and guidance;
+- distinguish GAAP from non-GAAP;
+- distinguish direct customer, distributor, contract manufacturer, and end customer;
+- do not call an absent disclosure `removed` unless equivalent scope is confirmed;
+- preserve conflicting historical knowledge states rather than selecting one with hindsight.
 
-For claims inside this database, use this priority:
+### 7. Emit governed output
 
-1. structured SEC fields, Inline XBRL, XML, and filing tables;
-2. explicit issuer statement in the primary filing or filed exhibit;
-3. issuer-attributed estimate, guidance, or risk statement;
-4. separately governed official external source with its own availability timestamp;
-5. high-quality secondary source, clearly marked external and never used to rewrite historical SEC evidence;
-6. reviewer inference, always `inferred` and `review_required`.
+Follow `references/REVIEW_OUTPUT_CONTRACT.md` exactly.
 
-A lower-ranked source cannot silently override a higher-ranked source. Conflicts must be preserved as separate assertions with a review note.
+Write append-only JSONL outside authoritative source tables. Never modify source snippets, source hashes, filing times, deterministic extraction rows, or original accepted assertions.
+
+## Project evidence hierarchy
+
+For this skill, use only evidence already governed by the project database:
+
+1. structured SEC/XBRL/XML/table record;
+2. explicit issuer statement in a filed primary document or exhibit;
+3. issuer estimate, guidance, risk statement, or management interpretation;
+4. reviewer inference from supplied PIT-eligible project evidence.
+
+Do not browse or add external evidence during this review. External enrichment must be a separate future pipeline with its own source table, timestamps, and governance.
 
 ## Relation rules
 
-A company relation requires an explicit subject, target, direction, and relation type.
+A relation requires explicit subject, target, direction, role, and evidence.
 
-Allowed automatic-review relation families include:
+Permitted refinement families include:
 
-- `supplier_of`, `customer_of`, `foundry_for`, `assembly_test_for`, `memory_supplier_for`;
-- `depends_on_capacity_of`, `licensed_from`, `licensed_to`, `distributes_for`;
-- `competes_with`, `strategic_partner_with`;
-- `invested_in` or `reported_holding_in` for structured 13F evidence;
-- `regulated_by` or `restricted_by` for explicit rules or government actions.
+- `foundry_for`
+- `memory_supplier_for`
+- `assembly_test_for`
+- `packaging_provider_for`
+- `component_supplier_for`
+- `customer_of`
+- `distributor_for`
+- `competes_with`
+- `licensed_from` / `licensed_to`
+- `restricted_by`
+- `reported_holding_in`
 
 Hard prohibitions:
 
-- do not reveal or guess anonymous Customer A/B/C identities;
-- do not turn co-mention into a relation;
-- do not treat an investment as a commercial relationship;
-- do not treat a competitor's action described in the filing as the issuer's action;
-- do not create self-relations;
-- do not infer causality from temporal sequence alone.
+- never guess Customer A/B/C/D identities;
+- never turn co-mention into a relation;
+- never turn a 13F holding into supplier, customer, partnership, control, or endorsement;
+- never treat a competitor's action as the issuer's action;
+- never create self-relations;
+- never infer causality from sequence alone;
+- never create issuer-side facts for a counterparty from another issuer's filing.
 
 ## Quantitative rules
 
-- Prefer deterministic XBRL/table values over narrative numbers.
-- Preserve currency, unit, scale, fiscal period, segment, GAAP/non-GAAP status, and actual/guidance status.
+- Prefer XBRL/table values over narrative numbers.
+- Preserve raw value, currency, unit, scale, period, segment, GAAP/non-GAAP, and actual/guidance status.
 - Never silently rescale thousands, millions, percentages, basis points, shares, or per-share values.
-- For 13F, preserve the value as reported under the applicable SEC schema; do not assume legacy thousands units.
-- Derived calculations require an explicit formula, input IDs, units, and calculation timestamp.
-- Do not compare fiscal quarters solely by label when fiscal calendars differ.
+- Derived calculations require formula, input IDs, units, and calculation timestamp.
+- Do not compare fiscal quarters by label alone when fiscal calendars differ.
+- 13F position data does not reveal transaction date or purchase price.
 
 ## PIT hard gate
 
-A claim is unusable for research if any of these is true:
+A claim is unusable if:
 
-- `source_available_at` is missing;
-- evidence becomes available after `signal_timestamp`;
-- only `report_date` or period end is known;
-- a later amendment was used to rewrite an earlier historical state;
-- an intraday signal uses date-precision-only evidence;
-- live use ignores local `observed_at` and processing latency;
-- the review used later prices or outcomes to decide whether the original claim was "correct".
-
-See `references/PIT_POLICY.md` for exact timing rules.
+- source availability is missing;
+- evidence is later than `signal_timestamp`;
+- only report date or period end is treated as availability;
+- a later amendment or filing rewrites an earlier state;
+- date-precision evidence is used intraday;
+- live use ignores `observed_at` and processing latency;
+- future prices, returns, outcomes, or later filings influenced the semantic decision.
 
 ## Confidence policy
 
-Confidence measures whether the proposed semantic representation is supported by the cited evidence, not whether the company statement is economically true.
+Confidence measures evidence-to-semantics support, not economic truth.
 
-- `0.98-1.00`: exact structured field or explicit unambiguous statement;
-- `0.90-0.97`: explicit statement requiring only entity normalization;
+- `0.98-1.00`: exact structured record or explicit unambiguous statement;
+- `0.90-0.97`: explicit statement requiring only controlled normalization;
 - `0.75-0.89`: supported interpretation with limited ambiguity;
-- `0.50-0.74`: plausible inference; keep `review_required`;
-- below `0.50`: return `no_change` rather than create a claim.
+- `0.50-0.74`: plausible inference; retain `review_required` and require challenger review;
+- below `0.50`: use `no_change`.
+
+## Mandatory challenger review
+
+A second independent reviewer is required when:
+
+- a claim names a supplier, customer, foundry, government, or competitor;
+- risk changes from hypothetical to realized;
+- actual versus guidance classification changes;
+- currency, unit, scale, segment, GAAP status, or period changes;
+- delta is `removed`, `intensified`, or `de_intensified`;
+- confidence is below 0.90;
+- a taxonomy proposal affects more than one issuer.
+
+The creator cannot approve its own new assertion.
 
 ## Completion gate
 
 A review batch is complete only when:
 
-- every output record has one valid primary `evidence_id`;
-- all used evidence is PIT-eligible;
+- every record has a valid primary `evidence_id`;
+- candidate selection reason is recorded;
+- all evidence is PIT-eligible;
 - source times and hashes are unchanged;
-- original deterministic assertions remain present;
+- original deterministic records remain present;
 - every new/superseding claim is `review_required`;
-- no anonymous entity was guessed;
-- no quantitative value lost its unit, period, or accounting basis;
-- contradictions and unsupported relations are explicitly flagged;
-- the batch can be replayed from stored IDs, prompt hash, model identity, and version.
+- no anonymous identity is guessed;
+- no quantitative value loses unit, period, scope, or accounting basis;
+- contradictions and limitations are explicit;
+- model identity, prompt hash, taxonomy version, and batch manifest are present;
+- the batch can be replayed from stored IDs.
