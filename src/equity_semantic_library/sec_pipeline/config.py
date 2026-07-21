@@ -50,6 +50,7 @@ class PipelineConfig:
     max_document_bytes: int = 512 * 1024 * 1024
     evidence_max_chars: int = 800
     xbrl_mode: str = "key_facts"
+    max_filings_per_symbol: int | None = None
     workers: WorkerConfig = field(default_factory=WorkerConfig)
     task_max_attempts: int = 3
     task_lease_seconds: int = 900
@@ -122,6 +123,7 @@ class PipelineConfig:
             sec_requests_per_second=float(os.getenv("SEC_REQUESTS_PER_SECOND", "4")),
             sec_max_attempts=int(os.getenv("SEC_MAX_ATTEMPTS", "6")),
             yahoo_min_interval_seconds=float(os.getenv("YF_MIN_INTERVAL_SECONDS", "0.75")),
+            max_filings_per_symbol=int(os.getenv("ESL_MAX_FILINGS_PER_SYMBOL", "0")) or None,
             workers=workers,
         )
         values.update(overrides)

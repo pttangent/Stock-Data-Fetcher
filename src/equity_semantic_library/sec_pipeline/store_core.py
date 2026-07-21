@@ -153,3 +153,33 @@ class CoreStoreMixin:
             conn.execute("BEGIN IMMEDIATE")
             conn.executemany(sql, values)
             conn.commit()
+
+    def record_filing_overflow(self, rows: list[dict[str, Any]]) -> None:
+        """Record filings that were skipped because a symbol had too many filings."""
+        if not rows:
+            return
+        now = utc_now()
+        prepared = []
+        for row in rows:
+            prepared.append({
+                "overflow_id": row.get("overflow_id") or f"overflow:{row['run_id']}:{row['accession']}",
+                "run_id": row["run_id"],
+                "issuer_id": row.get("issuer_id"),
+                "symbol": row["symbol"],
+                "cik": row["cik"],
+                "accession": row["accession"],
+                "form": row["form"],
+                "base_form": row["base_form"],
+                "form_group": row["form_group"],
+                "filing_date": row.get("filing_date"),
+                "report_date": row.get("report_date"),
+                "accepted_at": row.get("accepted_at"),
+                "available_at": row["available_at"],
+                "available_at_precision": row.get("available_at_precision", "date"),
+                "primary_document": row.get("primary_document"),
+                "source_url": row.get("source_url", ""),
+                "metadata_json": canonical_json(row.get("metadata", {})),
+                "reason": row.get("reason", "symbol_filing_overflow"),
+                "discovered_at": now,
+            })
+        self.insert_many("filing_overflow", prepared)

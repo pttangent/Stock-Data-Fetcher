@@ -51,6 +51,56 @@ class DagWorkerMixin:
             legal_name=root.get("name") or match.get("title"),
             metadata=root,
         )
+        max_filings = self.config.max_filings_per_symbol
+        if max_filings is not None and len(filings) > max_filings:
+            filings = sorted(
+                filings,
+                key=lambda r: (r.get("filingDate") or "", r.get("acceptanceDateTime") or ""),
+                reverse=True,
+            )
+            overflow = filings[max_filings:]
+            filings = filings[:max_filings]
+            overflow_rows = []
+            for filing in overflow:
+                form = str(filing.get("form") or "").upper()
+                group = form_group(form)
+                if not group:
+                    continue
+                available_at = filing.get("acceptanceDateTime") or filing.get("filingDate") or utc_now()
+                precision = "datetime" if filing.get("acceptanceDateTime") else "date"
+                overflow_rows.append({
+                    "run_id": task["run_id"],
+                    "issuer_id": issuer_id,
+                    "symbol": symbol,
+                    "cik": match["cik"],
+                    "accession": str(filing["accessionNumber"]),
+                    "form": form,
+                    "base_form": base_form(form),
+                    "form_group": group,
+                    "filing_date": filing.get("filingDate"),
+                    "report_date": filing.get("reportDate"),
+                    "accepted_at": filing.get("acceptanceDateTime"),
+                    "available_at": available_at,
+                    "available_at_precision": precision,
+                    "primary_document": filing.get("primaryDocument"),
+                    "source_url": archive.urls(match["cik"], filing)["complete"],
+                    "metadata": filing,
+                    "reason": "symbol_filing_overflow",
+                })
+            self.store.record_filing_overflow(overflow_rows)
+            self.store.insert_many("pipeline_issue", [{
+                "issue_id": stable_id("issue", task["run_id"], symbol, "overflow"),
+                "run_id": task["run_id"],
+                "task_id": task["task_id"],
+                "symbol": symbol,
+                "accession": None,
+                "stage": "discover_company",
+                "severity": "warning",
+                "code": "FilingOverflow",
+                "message": f"Symbol {symbol} has {len(filings) + len(overflow_rows)} filings; kept {len(filings)}, overflowed {len(overflow_rows)}",
+                "context_json": canonical_json({"symbol": symbol, "kept": len(filings), "overflow": len(overflow_rows)}),
+                "occurred_at": utc_now(),
+            }])
         for filing in filings:
             form = str(filing.get("form") or "").upper()
             group = form_group(form)

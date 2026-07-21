@@ -193,6 +193,15 @@ CREATE TABLE IF NOT EXISTS pipeline_issue(
     stage TEXT NOT NULL, severity TEXT NOT NULL, code TEXT NOT NULL, message TEXT NOT NULL,
     context_json TEXT NOT NULL, occurred_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS filing_overflow(
+    overflow_id TEXT PRIMARY KEY, run_id TEXT, issuer_id TEXT REFERENCES issuer(issuer_id),
+    symbol TEXT NOT NULL, cik TEXT NOT NULL, accession TEXT NOT NULL, form TEXT NOT NULL,
+    base_form TEXT NOT NULL, form_group TEXT NOT NULL, filing_date TEXT, report_date TEXT,
+    accepted_at TEXT, available_at TEXT NOT NULL, available_at_precision TEXT NOT NULL,
+    primary_document TEXT, source_url TEXT, metadata_json TEXT NOT NULL,
+    reason TEXT NOT NULL, discovered_at TEXT NOT NULL, UNIQUE(run_id,accession)
+);
+CREATE INDEX IF NOT EXISTS idx_filing_overflow_symbol ON filing_overflow(symbol,available_at);
 CREATE VIEW IF NOT EXISTS security_filing AS
 SELECT s.security_id AS query_security_id, s.symbol AS query_symbol, f.*
 FROM security s JOIN filing f ON f.issuer_id=s.issuer_id;
