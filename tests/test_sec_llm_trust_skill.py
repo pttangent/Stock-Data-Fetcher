@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 
@@ -11,6 +12,11 @@ TRUST_POLICY_PATH = SKILL_ROOT / "references" / "TRUST_SEMANTICS_POLICY.md"
 ROUTING_POLICY_PATH = SKILL_ROOT / "references" / "LLM_ROUTING_POLICY.md"
 ROUTING_SQL_PATH = SKILL_ROOT / "assets" / "select_llm_routing_candidates.sql"
 BRANCH = "agent/sec-llm-semantic-review-potential"
+
+
+def _normalize(text: str) -> str:
+    text = text.lower().replace("`", "")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def test_trust_skill_assets_exist() -> None:
@@ -59,8 +65,9 @@ def test_review_schema_requires_trust_and_promotion_dimensions() -> None:
         "D3",
         "R",
     ]
-    assert "promote_candidate_to_B" in schema["properties"]["promotion_recommendation"]["enum"]
-    assert "promote_candidate_to_A" not in schema["properties"]["promotion_recommendation"]["enum"]
+    recommendations = schema["properties"]["promotion_recommendation"]["enum"]
+    assert "promote_candidate_to_B" in recommendations
+    assert "promote_candidate_to_A" not in recommendations
 
     trust = schema["properties"]["trust_profile"]
     expected_dimensions = {
@@ -85,37 +92,42 @@ def test_review_schema_requires_trust_and_promotion_dimensions() -> None:
 
 
 def test_skill_separates_promotion_level_from_trust_tier() -> None:
-    skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-    trust_policy = TRUST_POLICY_PATH.read_text(encoding="utf-8")
-    routing_policy = ROUTING_POLICY_PATH.read_text(encoding="utf-8")
-    combined = f"{skill}\n{trust_policy}\n{routing_policy}"
+    combined = _normalize(
+        "\n".join(
+            [
+                (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8"),
+                TRUST_POLICY_PATH.read_text(encoding="utf-8"),
+                ROUTING_POLICY_PATH.read_text(encoding="utf-8"),
+            ]
+        )
+    )
 
     required_phrases = [
-        "Trust is multidimensional",
+        "trust is multidimensional",
         "promotion_level is not trust_tier",
         "semantic_support_score",
         "confidence == semantic_support_score",
-        "The LLM cannot mint promotion level A",
+        "the llm cannot mint promotion level a",
         "one governed evidence group",
     ]
     for phrase in required_phrases:
-        assert phrase.lower() in combined.lower()
+        assert _normalize(phrase) in combined
 
 
 def test_routing_policy_matches_expected_level_strategy() -> None:
-    policy = ROUTING_POLICY_PATH.read_text(encoding="utf-8")
+    policy = _normalize(ROUTING_POLICY_PATH.read_text(encoding="utf-8"))
     required = [
-        "A = 0% LLM",
-        "B = 1%-5% normal audit",
-        "C = 100% of eligible evidence groups",
-        "D1 = 100% after evidence grouping",
-        "D3 = 0% by default",
-        "R = 0.1%-1% stratified rule audit",
-        "Do not implement routing as",
-        "WHERE promotion_level != 'A'",
+        "a = 0% llm",
+        "b = 1%-5% normal audit",
+        "c = 100% of eligible evidence groups",
+        "d1 = 100% after evidence grouping",
+        "d3 = 0% by default",
+        "r = 0.1%-1% stratified rule audit",
+        "do not implement routing as",
+        "where promotion_level != 'a'",
     ]
     for phrase in required:
-        assert phrase in policy
+        assert _normalize(phrase) in policy
 
 
 def test_routing_sql_is_read_only_pit_bounded_and_grouped() -> None:
@@ -156,6 +168,6 @@ def test_no_instruction_routes_every_non_a_record_to_llm() -> None:
     ]
     prohibited = "where promotion_level != 'a'"
     for path in paths:
-        text = path.read_text(encoding="utf-8").lower()
+        text = _normalize(path.read_text(encoding="utf-8"))
         if prohibited in text:
             assert "never" in text or "do not" in text
