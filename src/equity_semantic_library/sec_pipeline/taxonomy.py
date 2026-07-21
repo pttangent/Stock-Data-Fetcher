@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-EXTRACTOR_VERSION = "deterministic-sec-semantics-v2"
+EXTRACTOR_VERSION = "deterministic-sec-semantics-v3"
 
 TOPICS: dict[str, tuple[str, tuple[str, ...]]] = {
     "ai_accelerators": ("technology", (r"\bGPU(?:s)?\b", r"AI accelerator", r"accelerated computing", r"\bTPU(?:s)?\b")),
@@ -57,6 +57,18 @@ CONCEPTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "HBM4": ("memory_product", (r"\bHBM4\b",)), "CoWoS": ("packaging_technology", (r"\bCoWoS\b",)),
 }
 
+CONCEPT_OWNERS: dict[str, frozenset[str]] = {
+    "Blackwell": frozenset({"NVDA"}), "Hopper": frozenset({"NVDA"}), "CUDA": frozenset({"NVDA"}),
+    "DGX": frozenset({"NVDA"}), "HGX": frozenset({"NVDA"}), "NVLink": frozenset({"NVDA"}),
+    "EPYC": frozenset({"AMD"}), "Ryzen": frozenset({"AMD"}), "Instinct": frozenset({"AMD"}), "ROCm": frozenset({"AMD"}),
+    "VMware": frozenset({"AVGO"}), "Gemini": frozenset({"GOOG", "GOOGL"}),
+    "Google Cloud": frozenset({"GOOG", "GOOGL"}), "YouTube": frozenset({"GOOG", "GOOGL"}),
+    "AWS": frozenset({"AMZN"}), "Prime": frozenset({"AMZN"}),
+    "Facebook": frozenset({"META"}), "Instagram": frozenset({"META"}), "WhatsApp": frozenset({"META"}),
+    "Reality Labs": frozenset({"META"}), "Llama": frozenset({"META"}),
+    "HBM3E": frozenset({"MU"}), "HBM4": frozenset({"MU"}),
+}
+
 ENTITY_ALIASES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "Taiwan Semiconductor Manufacturing Company": ("TSM", (r"\bTSMC\b", r"Taiwan Semiconductor Manufacturing")),
     "Samsung Electronics": (None, (r"Samsung Electronics", r"\bSamsung\b")),
@@ -70,12 +82,37 @@ ENTITY_ALIASES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "Wistron": (None, (r"\bWistron\b",)), "Fabrinet": ("FN", (r"\bFabrinet\b",)), "ASML": ("ASML", (r"\bASML\b",)),
 }
 
-RELATION_PATTERNS = {
-    "supplier_or_manufacturer": (r"we (?:rely|depend) on", r"our (?:supplier|manufacturer|foundry)", r"manufactured for us by", r"we source .* from"),
-    "customer_or_channel": (r"our customer", r"sales to", r"revenue from", r"our distributor", r"our channel partner"),
-    "competitor": (r"we compete with", r"our competitors? include", r"competition from"),
-    "partner_or_collaborator": (r"we partner with", r"we collaborate with", r"our alliance with"),
-    "investment_or_holding": (r"we invested in", r"our equity investment in", r"we hold shares of"),
+STRICT_RELATION_PATTERNS: dict[str, tuple[str, ...]] = {
+    "supplier_or_manufacturer": (
+        r"\b(?:we|our company|the company)\s+(?:rely|depend)\s+on\b",
+        r"\bour\s+(?:suppliers?|manufacturers?|foundries)\s+(?:include|are)\b",
+        r"\bmanufactured for us by\b", r"\bwe\s+source\b.{0,80}\bfrom\b",
+    ),
+    "customer_or_channel": (
+        r"\bour\s+(?:customers?|distributors?|channel partners?)\s+(?:include|are)\b",
+        r"\bwe\s+(?:sell|market|distribute)\b.{0,80}\bto\b",
+        r"\b(?:our\s+)?(?:sales|revenue)\s+(?:derived\s+)?from\b",
+    ),
+    "competitor": (
+        r"\bwe\s+compete\s+with\b", r"\bour\s+competitors?\s+(?:include|are)\b",
+        r"\bwe\s+face\s+competition\s+from\b",
+    ),
+    "partner_or_collaborator": (
+        r"\bwe\s+(?:partner|collaborate)\s+with\b",
+        r"\bour\s+(?:partnership|collaboration|alliance)\s+with\b",
+    ),
+    "investment_or_holding": (
+        r"\bwe\s+invested\s+in\b", r"\bour\s+(?:equity\s+)?investment\s+in\b",
+        r"\bwe\s+hold\s+shares\s+of\b",
+    ),
+}
+
+LOOSE_RELATION_TERMS: dict[str, tuple[str, ...]] = {
+    "supplier_or_manufacturer": (r"\brely\b", r"\bsupplier", r"\bmanufacturer", r"\bfoundr"),
+    "customer_or_channel": (r"\bcustomer", r"\bdistributor", r"channel partner", r"\bsales to\b", r"\brevenue from\b"),
+    "competitor": (r"\bcompete", r"\bcompetitor", r"competition from"),
+    "partner_or_collaborator": (r"\bpartner", r"\bcollaborat", r"\balliance"),
+    "investment_or_holding": (r"\binvest", r"\bhold shares"),
 }
 
 EVENT_ITEM_MAP = {
@@ -91,4 +128,5 @@ EVENT_ITEM_MAP = {
 COMPILED_TOPICS = [(name, group, [re.compile(p, re.I) for p in patterns]) for name, (group, patterns) in TOPICS.items()]
 COMPILED_CONCEPTS = [(name, group, [re.compile(p, re.I) for p in patterns]) for name, (group, patterns) in CONCEPTS.items()]
 COMPILED_ENTITIES = [(name, ticker, [re.compile(p, re.I) for p in patterns]) for name, (ticker, patterns) in ENTITY_ALIASES.items()]
-COMPILED_RELATIONS = [(kind, [re.compile(p, re.I) for p in patterns]) for kind, patterns in RELATION_PATTERNS.items()]
+COMPILED_STRICT_RELATIONS = [(kind, [re.compile(p, re.I) for p in patterns]) for kind, patterns in STRICT_RELATION_PATTERNS.items()]
+COMPILED_LOOSE_RELATIONS = [(kind, [re.compile(p, re.I) for p in patterns]) for kind, patterns in LOOSE_RELATION_TERMS.items()]
