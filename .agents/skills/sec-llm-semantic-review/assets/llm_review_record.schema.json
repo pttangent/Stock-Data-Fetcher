@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pttangent.local/schemas/sec-llm-review-v2.json",
-  "title": "SEC LLM Semantic Trust Review Record",
+  "$id": "https://pttangent.local/schemas/sec-llm-review-v3.json",
+  "title": "SEC LLM Trust and Promotion Review Record",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -9,6 +9,12 @@
     "review_id",
     "run_id",
     "batch_id",
+    "input_promotion_level",
+    "llm_route",
+    "evidence_group_id",
+    "candidate_ids",
+    "promotion_recommendation",
+    "routing_context",
     "candidate_reason",
     "primary_evidence_id",
     "corroborating_evidence_ids",
@@ -39,10 +45,69 @@
     "created_at"
   ],
   "properties": {
-    "schema_version": {"const": "sec-llm-review-v2"},
+    "schema_version": {"const": "sec-llm-review-v3"},
     "review_id": {"type": "string", "minLength": 1},
     "run_id": {"type": "string", "minLength": 1},
     "batch_id": {"type": "string", "minLength": 1},
+    "input_promotion_level": {
+      "enum": ["A", "B", "C", "D1", "D2", "D3", "R"]
+    },
+    "llm_route": {
+      "enum": [
+        "none",
+        "sampled_audit",
+        "mandatory",
+        "grouped_mandatory",
+        "aggregate_then_review",
+        "no_default_review",
+        "rejection_audit"
+      ]
+    },
+    "evidence_group_id": {"type": "string", "minLength": 1},
+    "candidate_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "promotion_recommendation": {
+      "enum": [
+        "keep_formal_B",
+        "promote_candidate_to_B",
+        "retain_C_or_D_review",
+        "reject_to_R",
+        "rule_regression_candidate",
+        "no_change"
+      ]
+    },
+    "routing_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "promotion_policy_version",
+        "section_role",
+        "grouping_key",
+        "dedupe_cluster_id",
+        "rule_id",
+        "rule_version",
+        "sample_rate",
+        "sample_seed",
+        "sample_reason",
+        "population_count"
+      ],
+      "properties": {
+        "promotion_policy_version": {"const": "promotion-routing-v1"},
+        "section_role": {"type": ["string", "null"]},
+        "grouping_key": {"type": "string", "minLength": 1},
+        "dedupe_cluster_id": {"type": ["string", "null"]},
+        "rule_id": {"type": ["string", "null"]},
+        "rule_version": {"type": ["string", "null"]},
+        "sample_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "sample_seed": {"type": ["string", "null"]},
+        "sample_reason": {"type": ["string", "null"]},
+        "population_count": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
     "reviewed_assertion_id": {"type": ["string", "null"]},
     "reviewed_relation_id": {"type": ["string", "null"]},
     "resolves_prior_review_id": {"type": ["string", "null"]},
@@ -61,7 +126,8 @@
         "segment_comparability",
         "legal_remedy_decomposition",
         "taxonomy_candidate",
-        "false_positive_correction"
+        "false_positive_correction",
+        "rule_audit"
       ]
     },
     "primary_evidence_id": {"type": "string", "minLength": 1},
@@ -230,7 +296,6 @@
         {
           "if": {"properties": {"inference_depth": {"enum": [2, 3]}}},
           "then": {
-            "required": ["inference_bridge"],
             "properties": {"inference_bridge": {"type": "string", "minLength": 1}}
           }
         },
@@ -285,6 +350,56 @@
     "created_at": {"type": "string", "format": "date-time"}
   },
   "allOf": [
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "A"}}},
+      "then": {"properties": {"llm_route": {"const": "none"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "B"}}},
+      "then": {"properties": {"llm_route": {"const": "sampled_audit"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "C"}}},
+      "then": {"properties": {"llm_route": {"const": "mandatory"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "D1"}}},
+      "then": {"properties": {"llm_route": {"const": "grouped_mandatory"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "D2"}}},
+      "then": {
+        "properties": {
+          "llm_route": {"const": "aggregate_then_review"},
+          "routing_context": {
+            "properties": {"dedupe_cluster_id": {"type": "string", "minLength": 1}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "D3"}}},
+      "then": {"properties": {"llm_route": {"const": "no_default_review"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "R"}}},
+      "then": {"properties": {"llm_route": {"const": "rejection_audit"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"enum": ["B", "R"]}}},
+      "then": {
+        "properties": {
+          "routing_context": {
+            "properties": {
+              "sample_rate": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+              "sample_seed": {"type": "string", "minLength": 1},
+              "sample_reason": {"type": "string", "minLength": 1},
+              "population_count": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
     {
       "if": {"properties": {"action": {"enum": ["accept", "reject", "supersede"]}}},
       "then": {
