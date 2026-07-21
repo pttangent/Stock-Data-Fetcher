@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import hashlib
 import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .archive import GlobalRateGate, SecArchive, SecClient, inventory_archive, load_symbol_metadata, sha256_file
 from .config import PipelineConfig
