@@ -27,6 +27,10 @@ def _config(args: argparse.Namespace, *, require_sec: bool) -> PipelineConfig:
     return config
 
 
+def _mode(args: argparse.Namespace) -> str:
+    return getattr(args, "mode", "all")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="esl-sec", description="Multi-worker SEC/Yfinance DAG pipeline")
     parser.add_argument("--config", help="JSON pipeline configuration")
@@ -39,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--limit", type=int)
     run.add_argument("--from-date", help="Filing date lower bound YYYY-MM-DD")
     run.add_argument("--to-date", help="Filing date upper bound YYYY-MM-DD")
+    run.add_argument("--mode", choices=["all", "download", "structure"], default="all",
+                     help="all=download+parse+semantic; download=raw SEC only; structure=parse/semantic existing downloads")
     run.add_argument("--refresh", action="store_true")
     run.add_argument("--no-yahoo", action="store_true")
     archive = sub.add_parser("import-archive", help="Run deterministic structure/semantic workers on existing ticker ZIP archives")
@@ -74,15 +80,19 @@ def validate_database(store: PipelineStore) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    config = _config(args, require_sec=args.command == "run")
+    require_sec = args.command == "run" and _mode(args) != "structure"
+    config = _config(args, require_sec=require_sec)
     store = PipelineStore(config.db_path)
     store.initialize()
     if args.command == "init":
         print(config.db_path)
         return 0
-    pipeline = DagPipeline(config, store=store)
+    pipeline = DagPipeline(config, store=store, mode=_mode(args))
     if args.command == "run":
-        run_id = pipeline.create_online_run(metadata_path=args.metadata, limit=args.limit, refresh=args.refresh, use_yahoo=not args.no_yahoo)
+        run_id = pipeline.create_online_run(
+            metadata_path=args.metadata, limit=args.limit, refresh=args.refresh,
+            use_yahoo=not args.no_yahoo,
+        )
         print(json.dumps(pipeline.run(run_id), ensure_ascii=False, indent=2))
         return 0
     if args.command == "import-archive":

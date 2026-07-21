@@ -77,13 +77,14 @@ class DagWorkerMixin:
             "retrieved_at": evidence["fetched_at"], "status": "downloaded", "metadata": metadata,
         })
         parse_task = PARSE_TASK_BY_GROUP[group]
-        self.store.schedule_task(
-            run_id=task["run_id"], task_type=parse_task, lane=LANE_BY_TASK[parse_task],
-            priority=int(task["priority"]) + 100, symbol=task["symbol"], cik=task["cik"],
-            accession=task["accession"], form=form,
-            payload={"filing_id": filing_id, "expected_sha256": evidence["sha256"]},
-            max_attempts=self.config.task_max_attempts, dependencies=[task["task_id"]],
-        )
+        if self.mode != "download":
+            self.store.schedule_task(
+                run_id=task["run_id"], task_type=parse_task, lane=LANE_BY_TASK[parse_task],
+                priority=int(task["priority"]) + 100, symbol=task["symbol"], cik=task["cik"],
+                accession=task["accession"], form=form,
+                payload={"filing_id": filing_id, "expected_sha256": evidence["sha256"]},
+                max_attempts=self.config.task_max_attempts, dependencies=[task["task_id"]],
+            )
         return {"filing_id": filing_id, "bytes": evidence["bytes"], "compressed_bytes": evidence["compressed_bytes"]}
 
     def _parse_filing(self, task: dict[str, Any]) -> dict[str, Any]:

@@ -31,11 +31,12 @@ class YahooGate:
 
 
 class DagPipeline(DagWorkerMixin):
-    def __init__(self, config: PipelineConfig, *, store: PipelineStore | None = None):
+    def __init__(self, config: PipelineConfig, *, store: PipelineStore | None = None, mode: str = "all"):
         self.config = config
         self.store = store or PipelineStore(config.db_path)
         self.store.initialize()
         self.policy = FormPolicy(config.include_forms, config.exclude_forms)
+        self.mode = mode
         self.sec_gate = GlobalRateGate(config.sec_requests_per_second)
         self.sec_client: SecClient | None = None
         self.sec_archive: SecArchive | None = None
@@ -69,7 +70,10 @@ class DagPipeline(DagWorkerMixin):
             self.sec_archive = SecArchive(self.config, self.sec_client)
         return self.sec_archive
 
-    def create_online_run(self, *, metadata_path: str | Path | None = None, limit: int | None = None, refresh: bool = False, use_yahoo: bool = True) -> str:
+    def create_online_run(
+        self, *, metadata_path: str | Path | None = None, limit: int | None = None,
+        refresh: bool = False, use_yahoo: bool = True,
+    ) -> str:
         path = Path(metadata_path or self.config.symbol_metadata_path)
         rows = load_symbol_metadata(path, limit=limit)
         source_hash = sha256_file(path)
@@ -77,22 +81,52 @@ class DagPipeline(DagWorkerMixin):
         run_id = self.store.start_run(self.config.to_jsonable(), str(path.resolve()), source_hash)
         for index, row in enumerate(rows):
             priority = index * 1000
-            discover = self.store.schedule_task(
-                run_id=run_id, task_type="discover_company", lane="download", priority=priority,
-                symbol=row["symbol"], payload={"refresh": refresh, "market_cap": row.get("market_cap"), "rank": row.get("rank")},
-                max_attempts=self.config.task_max_attempts,
-            )
-            if use_yahoo:
-                self.store.schedule_task(
-                    run_id=run_id, task_type="fetch_yahoo", lane="yahoo", priority=priority + 1,
-                    symbol=row["symbol"], payload={"refresh": refresh}, max_attempts=self.config.task_max_attempts,
-                    dependencies=[discover],
+            dependencies: list[str] = []
+            if self.mode in ("all", "download"):
+                discover = self.store.schedule_task(
+                    run_id=run_id, task_type="discover_company", lane="download", priority=priority,
+                    symbol=row["symbol"], payload={"refresh": refresh, "market_cap": row.get("market_cap"), "rank": row.get("rank")},
+                    max_attempts=self.config.task_max_attempts,
                 )
+                dependencies.append(discover)
+                if use_yahoo:
+                    self.store.schedule_task(
+                        run_id=run_id, task_type="fetch_yahoo", lane="yahoo", priority=priority + 1,
+                        symbol=row["symbol"], payload={"refresh": refresh}, max_attempts=self.config.task_max_attempts,
+                        dependencies=[discover],
+                    )
             self.store.schedule_task(
                 run_id=run_id, task_type="finalize_symbol", lane="finalize", priority=priority + 999,
-                symbol=row["symbol"], dependencies=[discover], max_attempts=1,
+                symbol=row["symbol"], dependencies=dependencies, max_attempts=1,
             )
+        if self.mode == "structure":
+            self._schedule_structure_tasks(run_id)
         return run_id
+
+    def _schedule_structure_tasks(self, run_id: str) -> None:
+        """Create parse/semantic tasks for filings already downloaded in a previous run."""
+        filings = self.store.query(
+            "SELECT * FROM filing WHERE status IN ('downloaded','parsed') AND form_group IS NOT NULL"
+        )
+        symbol_parse_tasks: dict[str, list[str]] = {}
+        for filing in filings:
+            group = filing["form_group"]
+            parse_task = PARSE_TASK_BY_GROUP.get(group)
+            if not parse_task:
+                continue
+            task_id = self.store.schedule_task(
+                run_id=run_id, task_type=parse_task, lane=LANE_BY_TASK[parse_task],
+                priority=0, symbol=filing["symbol"], cik=filing["cik"],
+                accession=filing["accession"], form=filing["form"],
+                payload={"filing_id": filing["filing_id"], "expected_sha256": filing["raw_sha256"]},
+                max_attempts=self.config.task_max_attempts,
+            )
+            symbol_parse_tasks.setdefault(filing["symbol"], []).append(task_id)
+        for symbol, deps in symbol_parse_tasks.items():
+            self.store.schedule_task(
+                run_id=run_id, task_type="finalize_symbol", lane="finalize", priority=999,
+                symbol=symbol, dependencies=deps, max_attempts=1,
+            )
 
     def create_archive_run(self, archives: list[str | Path], *, symbol: str | None = None) -> str:
         source_hash = hashlib.sha256()
