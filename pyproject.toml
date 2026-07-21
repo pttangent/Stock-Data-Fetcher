@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "equity-semantic-library"
-version = "0.1.0"
-description = "Point-in-time-safe public-equity metadata and SEC filing ingestion into a structured SQLite database."
+version = "0.2.0"
+description = "Point-in-time-safe public-equity metadata and multi-worker SEC/Yfinance structured ingestion."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
@@ -22,6 +22,7 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 esl = "equity_semantic_library.cli:main"
+esl-sec = "equity_semantic_library.sec_pipeline.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
