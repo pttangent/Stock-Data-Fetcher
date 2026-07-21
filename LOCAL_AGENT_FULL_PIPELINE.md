@@ -1,5 +1,7 @@
 # Local agent instruction — full SEC/Yfinance pipeline
 
+## Working directory and branch
+
 Work only in:
 
 ```text
@@ -9,23 +11,30 @@ D:\DEV\AnotherNetworkFactory\SEC_Yfinance_Fetcher
 Use branch:
 
 ```text
-agent/equity-semantic-library-clean
+agent/sec-llm-semantic-review-potential
 ```
 
-Do not edit, rewrite or move:
+This branch is rebuilt from:
+
+```text
+300026e8e2571e4b03dabf9dd172d4b65b7fab74
+Raise batch filing cap from 100 to 200
+```
+
+Do not edit, rewrite, or move:
 
 ```text
 D:\DEV\AnotherNetworkFactory\RAW_DATA\metadata\symbol_metadata.parquet
 ```
 
-The parquet file is a read-only scheduling source. The pipeline must write to its separate database and data directory configured in `config/sec_pipeline.local.json`.
+The parquet file is read-only scheduling input. The pipeline writes to its own data directory and database.
 
 ## Setup
 
 ```powershell
 cd D:\DEV\AnotherNetworkFactory
 
-git clone -b agent/equity-semantic-library-clean `
+git clone -b agent/sec-llm-semantic-review-potential `
   https://github.com/pttangent/Stock-Data-Fetcher.git `
   SEC_Yfinance_Fetcher
 
@@ -38,7 +47,7 @@ pip install -e ".[dev,parquet]"
 Copy-Item .\config\sec_pipeline.example.json .\config\sec_pipeline.local.json
 ```
 
-Verify these paths in `sec_pipeline.local.json`:
+Verify paths:
 
 ```text
 db_path = D:/DEV/AnotherNetworkFactory/SEC_Yfinance_Fetcher/data/sec_yfinance_structured.db
@@ -46,7 +55,7 @@ data_dir = D:/DEV/AnotherNetworkFactory/SEC_Yfinance_Fetcher/data/sec_yfinance
 symbol_metadata_path = D:/DEV/AnotherNetworkFactory/RAW_DATA/metadata/symbol_metadata.parquet
 ```
 
-Set a real SEC contact identity:
+Set a real SEC identity:
 
 ```powershell
 $env:SEC_IDENTITY = "Stock-Data-Fetcher YOUR_REAL_EMAIL@example.com"
@@ -60,7 +69,7 @@ python -m compileall -q .\src
 esl-sec --config .\config\sec_pipeline.local.json init
 ```
 
-Run the known MU archive validation first when the ZIP is available:
+Run MU archive validation first when available:
 
 ```powershell
 esl-sec --config .\config\sec_pipeline.local.json import-archive `
@@ -81,18 +90,20 @@ sha_mismatch_issues = 0
 quick_check = ok
 ```
 
-## Full production run
-
-Start the complete market-cap-prioritized pipeline:
+## Full deterministic production run
 
 ```powershell
 esl-sec --config .\config\sec_pipeline.local.json run 2>&1 `
   | Tee-Object -FilePath .\reports\full-pipeline.log
 ```
 
-The command prints the persistent `RUN_ID`. Record it in `reports/RUN_ID.txt`.
+Record `RUN_ID` in:
 
-Do not launch a second pipeline process against the same database. Concurrency is already internal: SEC download workers share one rate gate, while form-specific parse and semantic workers run independently.
+```text
+reports/RUN_ID.txt
+```
+
+Do not launch a second process against the same database. Download workers share one global rate gate; form-specific parse and deterministic semantic workers already run concurrently.
 
 Monitor:
 
@@ -100,75 +111,188 @@ Monitor:
 esl-sec --config .\config\sec_pipeline.local.json status <RUN_ID>
 ```
 
-Resume after reboot or interruption:
+Resume:
 
 ```powershell
 esl-sec --config .\config\sec_pipeline.local.json resume <RUN_ID>
 ```
 
-Final validation:
+Final deterministic validation:
 
 ```powershell
 esl-sec --config .\config\sec_pipeline.local.json validate `
   --output .\reports\full-pipeline-validation.json
 ```
 
-## Post-pipeline LLM semantic review
+## Post-pipeline promotion routing and LLM review
 
-The LLM review step is optional and occurs only after deterministic parsing, semantic extraction, and validation pass.
+Begin only after deterministic validation passes.
 
-Before reviewing any assertion, load:
+Read:
 
 ```text
+LOCAL_AGENT_SEC_LLM_REVIEW.md
 .agents/skills/sec-llm-semantic-review/SKILL.md
-```
-
-Then read all referenced policy files under:
-
-```text
-.agents/skills/sec-llm-semantic-review/references/
-```
-
-The LLM may review only:
-
-- assertions marked `review_required` or selected by an explicit audit query;
-- ambiguous products, aliases, relation directions, relation types, risks, events, disclosure deltas, and taxonomy candidates;
-- exact short evidence already present in `evidence_snippet`;
-- evidence whose governed availability is not later than the frozen `signal_timestamp`.
-
-The LLM must not:
-
-- parse raw filings again;
-- recalculate or replace XBRL/table facts;
-- inspect future filings, amendments, prices, returns, or later outcomes;
-- guess anonymous customer or supplier identities;
-- turn 13F holdings into supplier/customer/partnership claims;
-- write directly to authoritative tables or emit an accepted database status;
-- delete, rewrite, or shorten stored evidence.
-
-Write review output as append-only JSONL following:
-
-```text
+.agents/skills/sec-llm-semantic-review/references/TRUST_SEMANTICS_POLICY.md
+.agents/skills/sec-llm-semantic-review/references/LLM_ROUTING_POLICY.md
 .agents/skills/sec-llm-semantic-review/references/REVIEW_OUTPUT_CONTRACT.md
 ```
 
-Recommended path:
+### Promotion routing is not trust scoring
 
 ```text
-data/sec_yfinance/reviews/<RUN_ID>/<BATCH_ID>.jsonl
+promotion_level = deterministic admission/review route
+trust_tier      = epistemic quality after semantic review
 ```
 
-Each line must contain one atomic claim, one primary `evidence_id`, unchanged source availability time, model identity, prompt hash, confidence, limitations, and `status = review_required`.
+Do not send every record below A to the LLM.
 
-A later deterministic validator or human reviewer may promote a correction. The LLM itself may only recommend `accept`, `reject`, `supersede`, `create_candidate`, `no_change`, or `taxonomy_candidate`.
+Required routing:
+
+```text
+A  formal library; no normal LLM
+B  formal library; replayable 1%-5% audit, higher for configured high-impact relations
+C  review_required; mandatory by evidence group
+D1 grouped mandatory review
+D2 aggregate/deduplicate/rank before budgeted review
+D3 retained but no default review
+R  deterministic rejection; replayable 0.1%-1% rule audit
+```
+
+### Build the queue
+
+Use:
+
+```text
+.agents/skills/sec-llm-semantic-review/assets/select_llm_routing_candidates.sql
+```
+
+The scheduler must:
+
+1. exclude A;
+2. deterministically sample B rather than review all B;
+3. account for every eligible C evidence group;
+4. group D candidates by evidence sentence before calling the LLM;
+5. review every deduplicated D1 group;
+6. aggregate and rank D2 before budget selection;
+7. exclude D3 by default;
+8. audit only a small stratified R sample by rejection rule version.
+
+Never implement:
+
+```sql
+WHERE promotion_level != 'A'
+```
+
+### Evidence group is one request
+
+One request key:
+
+```text
+issuer_id
++ filing_id/accession
++ section_id or section_role
++ normalized evidence sentence hash
+```
+
+Bundle all entities/topics/candidate IDs generated by the same evidence sentence. The model may return multiple atomic JSONL outputs, but the sentence must be reviewed once, not once per candidate.
+
+### Trust review
+
+Every atomic output must distinguish:
+
+```text
+Evidence trust:
+source authenticity, hash, traceability, and PIT eligibility
+
+Semantic trust:
+support for the exact normalized claim
+
+Economic truth:
+whether the project independently establishes the underlying statement
+```
+
+A filed forecast can have strong semantic support while remaining `not_independently_assessed`. A legal allegation can be trustworthy as an attributed allegation without becoming a proven fact.
+
+Required trust profile:
+
+```text
+evidence_integrity
+source_authority
+statement_attribution
+semantic_directness
+inference_depth
+inference_premises
+inference_bridge
+temporal_eligibility
+scope_fidelity
+corroboration_state
+contradiction_state
+economic_truth_status
+semantic_support_score
+trust_tier
+```
+
+Invariant:
+
+```text
+confidence == trust_profile.semantic_support_score
+```
+
+Confidence is not probability, investment conviction, materiality, or expected return.
+
+### Promotion recommendations
+
+The LLM may recommend:
+
+```text
+keep_formal_B
+promote_candidate_to_B
+retain_C_or_D_review
+reject_to_R
+rule_regression_candidate
+no_change
+```
+
+The LLM cannot mint A. C/D-to-B promotion, B changes, and R audit failures require challenger review plus later validator/human approval.
+
+### Output
+
+Write:
+
+```text
+data/sec_yfinance/reviews/<RUN_ID>/<BATCH_ID>/records.jsonl
+```
+
+Also write:
+
+```text
+manifest.json
+candidate_query.sql
+candidate_query.sha256
+validation.json
+challenger_records.jsonl   # when required
+```
+
+Validate against:
+
+```text
+.agents/skills/sec-llm-semantic-review/assets/llm_review_record.schema.json
+```
+
+All new/corrected records remain `review_required`.
 
 ## Non-negotiable controls
 
-- Never include Forms 3, 4, 5 or 144 unless the user explicitly changes policy.
-- Process symbols in descending `market_cap`; use `rank` only as fallback.
-- Preserve SEC accession, source URL, SHA-256, acceptance time and local observation time.
-- Do not infer a named supplier/customer/competitor from loose co-occurrence. Only accepted strict issuer-first-person rules or structured 13F holdings may enter `company_relation` automatically.
-- Do not allow yfinance to overwrite SEC CIK or legal identity.
-- Do not delete or rewrite source evidence after LLM review. Corrections must supersede assertions while retaining `evidence_id` and original PIT timestamps.
-- Stop and report if `pipeline_issue` contains SHA mismatch, missing availability time, or database integrity failures.
-- Reject any LLM review batch containing future evidence, date-precision evidence used intraday, identity mismatch, source-time mutation, accepted-status output, missing prompt hash, or future-outcome reasoning.
+- Never include Forms 3, 4, 5, or 144 unless explicitly authorized.
+- Process symbols by descending market cap, using rank only as fallback.
+- Preserve accession, source URL, SHA-256, acceptance time, availability time, and local observation time.
+- Do not infer named relations from co-mention.
+- Do not guess anonymous customer/supplier identities.
+- Do not turn 13F holdings into supplier, customer, partnership, control, endorsement, or trade-timing claims.
+- Do not let yfinance overwrite SEC CIK or legal identity.
+- Do not rewrite source evidence or historical assertions.
+- Do not count repeated wording, multiple candidates from one sentence, or an 8-K plus issuer exhibit as independent corroboration.
+- Do not use later filings, prices, returns, or outcomes to upgrade earlier trust.
+- PIT/integrity failure must route to Tier X.
+- Stop on SHA mismatch, missing availability, database-integrity failure, invalid routing, ungrouped D, unreplayable sampling, incomplete trust profile, hidden inference, or unsupported economic-truth upgrade.

@@ -1,4 +1,4 @@
-# LLM Review Output Contract
+# LLM Review Output Contract — Trust and Promotion Routing
 
 ## Write boundary
 
@@ -7,42 +7,59 @@ The LLM must not directly update authoritative tables:
 - `filing`, `filing_document`, `filing_section`, `filing_table`;
 - `xbrl_fact`, `form13f_holding`, `event_ledger`;
 - `evidence_snippet`;
-- existing deterministic `semantic_assertion` or `company_relation` rows.
+- deterministic `semantic_assertion` or `company_relation` rows.
 
-The reviewer writes append-only JSONL to:
+Write append-only JSONL to:
 
 ```text
-data/sec_yfinance/reviews/<run_id>/<batch_id>.jsonl
+data/sec_yfinance/reviews/<run_id>/<batch_id>/records.jsonl
 ```
 
-A separate validator or human approval step may promote an approved record. The LLM never writes an accepted fact directly.
+A validator or human approval step may promote a reviewed result. The LLM never writes `status = accepted` and never mints promotion level A.
 
-## One-record rule
+## Request-unit versus output-unit
 
-Each line represents one atomic decision for one primary evidence item and, where applicable, one reviewed assertion or relation.
+One LLM request corresponds to one `evidence_group_id`, normally one governed evidence sentence/snippet with all candidate rows produced from it.
 
-Split records when they differ by:
+One request may return multiple decisions, but each JSONL line remains one atomic subject-predicate-object claim.
 
-- occurred versus future/potential state;
-- actual versus estimate/guidance;
-- counterparty or relation role;
-- product generation or lifecycle state;
-- period, segment, geography, accounting basis, or unit.
+Do not call the LLM separately for every company mention or topic candidate generated from the same evidence.
 
 ## Required record
 
 ```json
 {
-  "schema_version": "sec-llm-review-v1",
+  "schema_version": "sec-llm-review-v3",
   "review_id": "stable review identifier",
-  "run_id": "pipeline or review run identifier",
+  "run_id": "review run identifier",
   "batch_id": "review batch identifier",
+
+  "input_promotion_level": "C",
+  "llm_route": "mandatory",
+  "evidence_group_id": "stable evidence-group identifier",
+  "candidate_ids": ["candidate-1", "candidate-2"],
+  "promotion_recommendation": "promote_candidate_to_B",
+  "routing_context": {
+    "promotion_policy_version": "promotion-routing-v1",
+    "section_role": "issuer_risk",
+    "grouping_key": "issuer|filing|section|sentence-hash",
+    "dedupe_cluster_id": null,
+    "rule_id": "relation-rule-id",
+    "rule_version": "rule-version",
+    "sample_rate": null,
+    "sample_seed": null,
+    "sample_reason": null,
+    "population_count": null
+  },
+
   "reviewed_assertion_id": null,
   "reviewed_relation_id": null,
   "resolves_prior_review_id": null,
-  "candidate_reason": "potential_future_event",
+  "candidate_reason": "relation_role_refinement",
   "primary_evidence_id": "evidence identifier",
   "corroborating_evidence_ids": [],
+  "conflicting_evidence_ids": [],
+
   "security_id": "security identifier",
   "issuer_id": "issuer identifier",
   "symbol": "AMD",
@@ -52,35 +69,42 @@ Split records when they differ by:
   "signal_timestamp": "2026-01-01T15:00:00Z",
   "source_available_at": "2025-11-04T23:07:50Z",
   "source_available_at_precision": "datetime",
+
   "action": "create_candidate",
-  "claim_class": "risk_hypothesis",
-  "occurrence_status": "conditional_potential",
+  "claim_class": "reported_fact",
+  "occurrence_status": "ongoing",
   "subject_key": "security:AMD",
-  "predicate": "potential_event",
+  "predicate": "foundry_dependency_on",
   "object": {
-    "event_type": "future_export_licensed_sales",
-    "affected_scope": {
-      "product": "AMD Instinct MI308",
-      "geography": "China"
-    },
-    "trigger_conditions": [
-      "customer demand exists",
-      "Chinese import rules permit shipment",
-      "required export licenses are available"
-    ],
-    "expected_window": null,
-    "quantitative_range": null,
-    "probability_language": "depends on",
-    "issuer_commitment_level": "conditional"
+    "target_entity_key": "company:TSMC",
+    "product_scope": "explicitly supported scope only"
   },
   "explicitness": "explicit",
-  "confidence": 0.94,
+
+  "trust_profile": {
+    "evidence_integrity": "verified",
+    "source_authority": "filed_primary_document",
+    "statement_attribution": "issuer_reported_statement",
+    "semantic_directness": "normalized_explicit",
+    "inference_depth": 1,
+    "inference_premises": ["evidence identifier"],
+    "inference_bridge": null,
+    "temporal_eligibility": "eligible_datetime",
+    "scope_fidelity": "bounded",
+    "corroboration_state": "single_information_event",
+    "contradiction_state": "none",
+    "economic_truth_status": "issuer_attested",
+    "semantic_support_score": 0.95,
+    "trust_tier": "B"
+  },
+
+  "confidence": 0.95,
   "status": "review_required",
   "effective_from": null,
   "effective_to": null,
   "delta_class": null,
-  "rationale": "The filing describes future sales as conditional on demand, import rules, and licenses; it does not report that those sales occurred.",
-  "limitations": ["future_state_not_observed"],
+  "rationale": "The issuer explicitly describes the named manufacturing dependency; scope is limited to the products stated in the evidence.",
+  "limitations": ["issuer_side_evidence_only"],
   "reviewer": {
     "provider": "local",
     "model": "model-name",
@@ -89,22 +113,113 @@ Split records when they differ by:
   },
   "prompt_hash": "sha256 of system plus task prompt",
   "taxonomy_version": "version identifier",
+  "trust_policy_version": "trust-semantics-v1",
   "created_at": "2026-07-21T00:00:00Z"
 }
 ```
 
-## Allowed actions
+## Promotion and route fields
+
+### Input promotion level
 
 ```text
-accept
-reject
-supersede
-create_candidate
-no_change
-taxonomy_candidate
+A
+B
+C
+D1
+D2
+D3
+R
 ```
 
-`accept` recommends retaining a deterministic record. It does not authorize `status = accepted`.
+Normal routing:
+
+| Level | Formal library | Normal LLM route |
+|---|---:|---|
+| A | yes | none |
+| B | yes | sampled audit |
+| C | no | mandatory by evidence group |
+| D1 | no | grouped mandatory |
+| D2 | no | aggregate/deduplicate/prioritize |
+| D3 | no | no default review |
+| R | no | rejection-rule audit sample |
+
+### LLM route
+
+```text
+none
+sampled_audit
+mandatory
+grouped_mandatory
+aggregate_then_review
+no_default_review
+rejection_audit
+```
+
+A/D3 records should normally produce no review output. Their presence requires an explicit QA or targeted-review reason in `routing_context.sample_reason`.
+
+### Promotion recommendation
+
+```text
+keep_formal_B
+promote_candidate_to_B
+retain_C_or_D_review
+reject_to_R
+rule_regression_candidate
+no_change
+```
+
+The LLM cannot recommend or create A. A requires deterministic structured/direct validation.
+
+A B audit normally returns `keep_formal_B` or `no_change`. A B change requires concrete evidence and challenger review.
+
+An R audit failure returns `rule_regression_candidate`; it does not directly promote the rejected record.
+
+## Routing context
+
+Every record requires:
+
+```text
+promotion_policy_version
+grouping_key
+section_role
+rule_id
+rule_version
+```
+
+Nullable sampling/dedup fields must still be present:
+
+```text
+dedupe_cluster_id
+sample_rate
+sample_seed
+sample_reason
+population_count
+```
+
+For B and R audits, sampling metadata is mandatory and must be replayable.
+
+For D2, `dedupe_cluster_id` is mandatory.
+
+## Candidate reasons
+
+```text
+trust_profile_reconstruction
+attribution_ambiguity
+inference_audit
+product_lifecycle_state
+mixed_actual_estimate_risk
+potential_future_event
+relation_role_refinement
+relation_scope_missing
+contradiction_review
+disclosure_delta
+segment_comparability
+legal_remedy_decomposition
+taxonomy_candidate
+false_positive_correction
+rule_audit
+```
 
 ## Claim classes
 
@@ -118,9 +233,9 @@ third_party_statement
 reviewer_inference
 ```
 
-## Occurrence status
+Claim class describes financial meaning. `statement_attribution` describes who or what produced the statement.
 
-Every output record requires one:
+## Occurrence status
 
 ```text
 occurred
@@ -133,151 +248,123 @@ undetermined
 not_applicable
 ```
 
-Interpretation:
+Future states require `predicate = potential_event`. Confidence is never event probability.
 
-- `occurred`: the event or accounting impact explicitly happened;
-- `ongoing`: a rule, restriction, obligation, process, or state is currently in force;
-- `announced_not_occurred`: committed or announced, but not yet completed;
-- `expected_not_occurred`: management expects it, but it has not happened;
-- `conditional_potential`: may happen only if stated conditions are met;
-- `hypothetical_risk`: generic risk possibility without a specific expected event;
-- `undetermined`: evidence cannot safely establish occurrence;
-- `not_applicable`: non-event semantics such as stable taxonomy or supplier role.
+## Trust profile
 
-For future/potential states, `predicate` must be:
+The required trust dimensions and enums are defined in `TRUST_SEMANTICS_POLICY.md`.
 
-```text
-potential_event
-```
+Important invariants:
 
-The object should preserve, when available:
+- `confidence == trust_profile.semantic_support_score`;
+- trust tier is derived from all dimensions, not score alone;
+- PIT/integrity failure requires Tier X;
+- SEC filing status proves provenance/timing, not objective truth of every statement;
+- management estimates and interpretations may have high semantic support while economic truth remains unassessed;
+- repeated wording and several candidates from one sentence are not independent corroboration.
 
-```text
-event_type
-affected_scope
-trigger_conditions
-expected_window
-quantitative_range
-probability_language
-issuer_commitment_level
-```
+## Evidence grouping rules
 
-Do not invent missing probability, time, amount, or trigger.
-
-## Potential-to-occurred resolution
-
-A later filing may resolve an earlier potential event. The later record may set:
+`evidence_group_id` must be stable and reproducible from governed identifiers, normally:
 
 ```text
-resolves_prior_review_id = <earlier potential review ID>
+issuer_id
++ filing_id/accession
++ section_id or section_role
++ normalized evidence sentence hash
 ```
 
-Rules:
+`candidate_ids` must contain every candidate reviewed in the request. Each atomic output may reference the relevant subset but must preserve the request-level group.
 
-1. Preserve the earlier potential record and its original availability time.
-2. Create a new `occurred` or resolution record using later evidence.
-3. Never rewrite the earlier record as though the event was already known to have occurred.
-4. A cancelled or withdrawn plan is a new resolution event, not deletion.
+D1/D2 review is invalid if the same evidence was sent once per candidate row.
 
-## Candidate reasons
+For D2 aggregation, preserve all evidence IDs and PIT times even when repeated sentences are clustered.
+
+## Sampling rules
+
+B and R sampling must record:
+
+- rule ID/version;
+- promotion policy version;
+- deterministic sample seed/hash rule;
+- configured sample rate;
+- population and sample counts;
+- strata and sample reason.
+
+Recommended policy ranges:
 
 ```text
-product_lifecycle_state
-mixed_actual_estimate_risk
-potential_future_event
-relation_role_refinement
-relation_scope_missing
-disclosure_delta
-segment_comparability
-legal_remedy_decomposition
-taxonomy_candidate
-false_positive_correction
+B normal audit 1%-5%, higher for configured high-impact relations
+R rule audit 0.1%-1%
 ```
 
-## Explicitness
+Do not treat ranges as hardcoded constants. Store the actual run configuration.
 
-Use project database values only:
+## Inference contract
 
 ```text
-explicit
-estimated
-inferred
+0 direct structured or explicit statement
+1 controlled normalization
+2 composition of explicit premises
+3 unstated bridge or reviewer inference
 ```
 
-Statement attribution is represented by `claim_class`, not a separate explicitness enum.
+- list every premise evidence ID;
+- require `inference_bridge` for depth 2/3;
+- depth 3 requires challenger review and cannot be automatically promoted;
+- co-mention, sequence, embedding similarity, later outcomes, and same-industry presence are not valid hidden bridges.
 
-## Identity and evidence rules
+## Economic truth and corroboration
 
-- Identity fields must match the primary evidence row.
-- Anonymous entities stay anonymous.
-- A counterparty mentioned in one issuer's filing does not become an issuer-side fact for that counterparty.
-- `primary_evidence_id` is mandatory.
-- Corroborating evidence must be supplied and PIT-eligible.
-- `source_available_at` must exactly match the database.
-- Do not paste altered evidence into the output.
-- No current web or external evidence may be added in this review batch.
-
-## Timing rules
-
-- `source_available_at <= signal_timestamp` is mandatory.
-- Date-precision evidence is invalid for intraday review.
-- `effective_from` never changes when the evidence became knowable.
-- `created_at` is review time, not source availability.
-- Later outcomes cannot influence the earlier semantic classification.
+- A filed forecast is trustworthy evidence of the forecast, not proof of realization.
+- A legal allegation remains attributed unless eligible procedural evidence establishes an outcome.
+- An 8-K and its issuer press release are normally one information event.
+- A deterministic candidate plus its source evidence is not corroboration.
+- Later actual results create new records; they do not upgrade an earlier historical estimate.
 
 ## Action rules
 
-- `accept`: requires a reviewed assertion or relation ID.
-- `reject`: requires a reviewed record ID and concrete reason.
-- `supersede`: requires a reviewed record ID and corrected atomic claim.
+- `accept`: requires a reviewed deterministic ID and does not emit accepted status.
+- `reject`: requires a reviewed ID and concrete reason.
+- `supersede`: requires corrected atomic semantics and challenger review when a formal B record changes.
 - `create_candidate`: requires supported predicate/object.
-- `no_change`: rationale must explain insufficient evidence.
-- `taxonomy_candidate`: object must include canonical label, definition, parent, aliases, and collision notes.
-
-## Confidence
-
-Confidence measures evidence-to-semantics support, not whether a potential event will occur.
-
-- New inferred claims below `0.50` are prohibited; use `no_change`.
-- Results below `0.90` require challenger review.
-- Do not use confidence as an event probability.
-
-## Limitations
-
-Suggested labels:
-
-```text
-anonymous_counterparty
-management_claim_unverified
-scope_ambiguous
-period_not_comparable
-relation_direction_uncertain
-unit_or_scale_uncertain
-issuer_side_evidence_missing
-future_state_not_observed
-condition_incomplete
-event_time_not_stated
-```
+- `no_change`: explains insufficient evidence or confirms sampled B/R audit.
+- `taxonomy_candidate`: includes canonical label, definition, parent, aliases, evidence, and collision notes.
 
 ## Batch manifest
 
 ```json
 {
-  "schema_version": "sec-llm-review-batch-v1",
+  "schema_version": "sec-llm-review-batch-v3",
   "run_id": "...",
   "batch_id": "...",
   "signal_timestamp": "...",
   "candidate_query_hash": "...",
+  "promotion_policy_version": "promotion-routing-v1",
+  "promotion_level_population_counts": {},
+  "promotion_level_selected_counts": {},
+  "llm_route_counts": {},
+  "evidence_group_count": 0,
+  "candidate_row_count": 0,
+  "deduplicated_candidate_count": 0,
+  "sample_configuration": {
+    "sample_seed": "...",
+    "B_sample_rate": null,
+    "R_sample_rate": null,
+    "strata": []
+  },
   "candidate_reason_counts": {},
   "occurrence_status_counts": {},
-  "input_assertion_count": 100,
-  "input_relation_count": 10,
-  "input_evidence_count": 100,
-  "output_record_count": 100,
-  "action_counts": {},
+  "trust_tier_counts": {},
+  "attribution_counts": {},
+  "inference_depth_counts": {},
+  "economic_truth_status_counts": {},
+  "promotion_recommendation_counts": {},
+  "output_record_count": 0,
   "model": {},
   "prompt_hash": "...",
   "taxonomy_version": "...",
+  "trust_policy_version": "trust-semantics-v1",
   "source_database_sha256": "...",
   "started_at": "...",
   "completed_at": "...",
@@ -287,30 +374,45 @@ event_time_not_stated
 
 ## Validation gate
 
-Reject the batch when any of these is non-zero:
+Reject the batch when any is non-zero:
 
 ```text
+all_non_A_sent_to_llm
+A_sent_without_explicit_qa
+B_population_sent_without_sampling
+B_sampling_not_replayable
+C_eligible_evidence_group_skipped
+D_candidate_row_used_as_request_unit
+D1_not_grouped
+D2_not_deduplicated
+D3_sent_by_default
+R_used_as_normal_review_queue
+R_sampling_not_replayable
+promotion_level_confused_with_trust_tier
+llm_directly_mints_A
+missing_evidence_group_id
+candidate_group_membership_mismatch
 missing_primary_evidence
 unknown_evidence_id
 identity_mismatch
 source_time_mismatch
 evidence_after_signal_timestamp
 intraday_date_precision_use
-invalid_enum
+missing_trust_profile
+confidence_score_mismatch
+trust_tier_derived_from_score_only
+pit_or_integrity_failure_not_tier_x
+missing_inference_premise
+missing_inference_bridge
+hidden_inference_bridge
+duplicate_evidence_counted_as_independent
+sec_filing_treated_as_proof_of_economic_truth
+management_estimate_stored_as_verified_fact
+legal_allegation_stored_as_proven_fact
+unsupported_economic_truth_upgrade
+later_outcome_used_to_regrade_history
 accepted_status_emitted
-missing_candidate_reason
-missing_occurrence_status
-potential_stored_as_occurred
-occurred_stored_as_potential
-later_resolution_rewrites_prior_state
-future_amount_stored_as_actual
-condition_missing_for_conditional_event
-invented_probability
-invented_event_date
-missing_model_identity
-missing_prompt_hash
 multi_claim_record
-future_outcome_reference
 external_enrichment_used
 source_evidence_mutation
 ```
