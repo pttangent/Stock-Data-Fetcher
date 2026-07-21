@@ -97,7 +97,7 @@ class PipelineConfig:
         return raw
 
     @classmethod
-    def from_env(cls, **overrides) -> "PipelineConfig":
+    def from_env(cls, **overrides) -> PipelineConfig:
         workers = WorkerConfig(
             download=int(os.getenv("ESL_SEC_DOWNLOAD_WORKERS", "4")),
             yahoo=int(os.getenv("ESL_YAHOO_WORKERS", "2")),
@@ -128,7 +128,7 @@ class PipelineConfig:
         return cls(**values)
 
     @classmethod
-    def from_json(cls, path: str | Path, **overrides) -> "PipelineConfig":
+    def from_json(cls, path: str | Path, **overrides) -> PipelineConfig:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         if "workers" in raw:
             raw["workers"] = WorkerConfig(**raw["workers"])
