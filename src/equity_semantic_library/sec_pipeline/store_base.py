@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+import sqlite3
 
 from .store_schema import SCHEMA_VERSION, _SCHEMA
 from .store_utils import utc_now
