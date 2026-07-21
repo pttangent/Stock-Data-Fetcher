@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import hashlib
 import json
-from datetime import datetime, timezone
 from typing import Any
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def canonical_json(value: Any) -> str:
