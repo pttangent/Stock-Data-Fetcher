@@ -13,3 +13,6 @@ dist/
 data/raw/
 data/cache/
 data/exports/
+data/sec_yfinance/
+reports/
+config/sec_pipeline.local.json
