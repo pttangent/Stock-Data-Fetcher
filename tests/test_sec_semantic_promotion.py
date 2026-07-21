@@ -230,10 +230,11 @@ def test_issuer_security_views_and_review_roundtrip() -> None:
         assert result["count"] >= 1
         items = [json.loads(line) for line in queue.read_text(encoding="utf-8").splitlines()]
         candidate = next(
-            item
+            candidate
             for item in items
-            if item["candidate"]["candidate_type"] == "topic"
-            and item["candidate"]["object"]["topic"] == "cloud_services"
+            for candidate in item["candidates"]
+            if candidate["candidate_type"] == "topic"
+            and candidate["object"]["topic"] == "cloud_services"
         )
         decisions = root / "decisions.jsonl"
         decisions.write_text(
