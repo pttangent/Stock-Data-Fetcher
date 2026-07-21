@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
-from typing import Any, Callable
+from typing import Any
 
 from .store_schema import SCHEMA_VERSION, _SCHEMA
 from .store_utils import utc_now
