@@ -2,36 +2,15 @@ from __future__ import annotations
 
 import re
 
-EXTRACTOR_VERSION = "deterministic-sec-semantics-v5"
+EXTRACTOR_VERSION = "deterministic-sec-semantics-v4"
 
 TOPICS: dict[str, tuple[str, tuple[str, ...]]] = {
     "ai_accelerators": ("technology", (r"\bGPU(?:s)?\b", r"AI accelerator", r"accelerated computing", r"\bTPU(?:s)?\b")),
     "generative_ai": ("technology", (r"generative AI", r"large language model", r"\bLLM(?:s)?\b", r"foundation model")),
     "data_center": ("end_market", (r"data cent(?:er|re)", r"hyperscal", r"cloud infrastructure")),
     "cloud_services": ("end_market", (r"cloud service", r"cloud computing", r"public cloud", r"cloud platform")),
-    "semiconductors": (
-        "industry",
-        (
-            r"\bsemiconductors?\b",
-            r"\bintegrated circuits?\b",
-            r"\bmicroprocessors?\b",
-            r"\bcentral processing units?\b",
-            r"\bCPUs?\b",
-            r"\bgraphics processing units?\b",
-            r"\bchips?\b",
-        ),
-    ),
-    "foundry_and_wafer": (
-        "supply_chain",
-        (
-            r"\bsemiconductor foundr(?:y|ies)\b",
-            r"\bwafer foundr(?:y|ies)\b",
-            r"\bfoundry services\b",
-            r"wafer fabrication",
-            r"wafer supply",
-            r"\bfabless\b",
-        ),
-    ),
+    "semiconductors": ("industry", (r"semiconductor", r"integrated circuit", r"processor", r"\bchip(?:s)?\b")),
+    "foundry_and_wafer": ("supply_chain", (r"foundr(?:y|ies)", r"wafer fabrication", r"wafer supply", r"fabless")),
     "advanced_packaging": ("supply_chain", (r"advanced packaging", r"CoWoS", r"2\.5D packaging", r"3D packaging", r"chiplet")),
     "memory_hbm": ("technology", (r"high[- ]bandwidth memory", r"\bHBM(?:2E|3|3E|4)?\b")),
     "memory_dram": ("technology", (r"\bDRAM\b",)),
@@ -42,12 +21,12 @@ TOPICS: dict[str, tuple[str, tuple[str, ...]]] = {
     "digital_advertising": (
         "business_model",
         (
-            r"\bdigital advertising\b",
-            r"\bonline advertising\b",
-            r"\badvertising revenue\b",
-            r"\bad revenue\b",
-            r"\bad impressions?\b",
-            r"\badvertisers?\b.{0,80}\b(?:spend|campaign|platform|revenue)\b",
+            r"digital advertising",
+            r"online advertising",
+            r"advertising revenue",
+            r"ad revenue",
+            r"ad impressions?",
+            r"advertisers?\b.{0,80}\b(?:spend|campaign|platform|revenue)",
         ),
     ),
     "ecommerce": ("business_model", (r"e[- ]commerce", r"online store", r"online marketplace", r"third[- ]party seller")),
@@ -109,8 +88,7 @@ ENTITY_ALIASES: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "Alphabet/Google": ("GOOGL", (r"\bAlphabet\b", r"\bGoogle\b")), "Amazon": ("AMZN", (r"\bAmazon\b",)),
     "Meta Platforms": ("META", (r"Meta Platforms", r"\bMeta\b")), "Microsoft": ("MSFT", (r"\bMicrosoft\b",)),
     "Apple": ("AAPL", (r"\bApple\b",)), "Oracle": ("ORCL", (r"\bOracle\b",)), "CoreWeave": (None, (r"\bCoreWeave\b",)),
-    "Arm Holdings": ("ARM", (r"\bArm Holdings(?: plc)?\b", r"\bArm Limited\b", r"\bArm Ltd\.?\b", r"\bArm plc\b")),
-    "Hon Hai/Foxconn": (None, (r"Hon Hai", r"\bFoxconn\b")),
+    "Arm Holdings": ("ARM", (r"Arm Holdings", r"\bArm\b")), "Hon Hai/Foxconn": (None, (r"Hon Hai", r"\bFoxconn\b")),
     "Wistron": (None, (r"\bWistron\b",)), "Fabrinet": ("FN", (r"\bFabrinet\b",)), "ASML": ("ASML", (r"\bASML\b",)),
 }
 
