@@ -1,0 +1,435 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pttangent.local/schemas/sec-llm-review-v3.json",
+  "title": "SEC LLM Trust and Promotion Review Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "review_id",
+    "run_id",
+    "batch_id",
+    "input_promotion_level",
+    "llm_route",
+    "evidence_group_id",
+    "candidate_ids",
+    "promotion_recommendation",
+    "routing_context",
+    "candidate_reason",
+    "primary_evidence_id",
+    "corroborating_evidence_ids",
+    "conflicting_evidence_ids",
+    "security_id",
+    "issuer_id",
+    "symbol",
+    "filing_id",
+    "accession",
+    "form",
+    "signal_timestamp",
+    "source_available_at",
+    "source_available_at_precision",
+    "action",
+    "claim_class",
+    "occurrence_status",
+    "subject_key",
+    "explicitness",
+    "trust_profile",
+    "confidence",
+    "status",
+    "rationale",
+    "limitations",
+    "reviewer",
+    "prompt_hash",
+    "taxonomy_version",
+    "trust_policy_version",
+    "created_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "sec-llm-review-v3"},
+    "review_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "batch_id": {"type": "string", "minLength": 1},
+    "input_promotion_level": {
+      "enum": ["A", "B", "C", "D1", "D2", "D3", "R"]
+    },
+    "llm_route": {
+      "enum": [
+        "none",
+        "sampled_audit",
+        "mandatory",
+        "grouped_mandatory",
+        "aggregate_then_review",
+        "no_default_review",
+        "rejection_audit"
+      ]
+    },
+    "evidence_group_id": {"type": "string", "minLength": 1},
+    "candidate_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "promotion_recommendation": {
+      "enum": [
+        "keep_formal_B",
+        "promote_candidate_to_B",
+        "retain_C_or_D_review",
+        "reject_to_R",
+        "rule_regression_candidate",
+        "no_change"
+      ]
+    },
+    "routing_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "promotion_policy_version",
+        "section_role",
+        "grouping_key",
+        "dedupe_cluster_id",
+        "rule_id",
+        "rule_version",
+        "sample_rate",
+        "sample_seed",
+        "sample_reason",
+        "population_count"
+      ],
+      "properties": {
+        "promotion_policy_version": {"const": "promotion-routing-v1"},
+        "section_role": {"type": ["string", "null"]},
+        "grouping_key": {"type": "string", "minLength": 1},
+        "dedupe_cluster_id": {"type": ["string", "null"]},
+        "rule_id": {"type": ["string", "null"]},
+        "rule_version": {"type": ["string", "null"]},
+        "sample_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "sample_seed": {"type": ["string", "null"]},
+        "sample_reason": {"type": ["string", "null"]},
+        "population_count": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "reviewed_assertion_id": {"type": ["string", "null"]},
+    "reviewed_relation_id": {"type": ["string", "null"]},
+    "resolves_prior_review_id": {"type": ["string", "null"]},
+    "candidate_reason": {
+      "enum": [
+        "trust_profile_reconstruction",
+        "attribution_ambiguity",
+        "inference_audit",
+        "product_lifecycle_state",
+        "mixed_actual_estimate_risk",
+        "potential_future_event",
+        "relation_role_refinement",
+        "relation_scope_missing",
+        "contradiction_review",
+        "disclosure_delta",
+        "segment_comparability",
+        "legal_remedy_decomposition",
+        "taxonomy_candidate",
+        "false_positive_correction",
+        "rule_audit"
+      ]
+    },
+    "primary_evidence_id": {"type": "string", "minLength": 1},
+    "corroborating_evidence_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "conflicting_evidence_ids": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "security_id": {"type": "string", "minLength": 1},
+    "issuer_id": {"type": "string", "minLength": 1},
+    "symbol": {"type": "string", "minLength": 1},
+    "filing_id": {"type": "string", "minLength": 1},
+    "accession": {"type": "string", "minLength": 1},
+    "form": {"type": "string", "minLength": 1},
+    "signal_timestamp": {"type": "string", "format": "date-time"},
+    "source_available_at": {"type": "string", "format": "date-time"},
+    "source_available_at_precision": {
+      "enum": ["datetime", "date", "derived"]
+    },
+    "action": {
+      "enum": [
+        "accept",
+        "reject",
+        "supersede",
+        "create_candidate",
+        "no_change",
+        "taxonomy_candidate"
+      ]
+    },
+    "claim_class": {
+      "enum": [
+        "reported_fact",
+        "management_estimate",
+        "risk_hypothesis",
+        "policy_or_rule",
+        "management_interpretation",
+        "third_party_statement",
+        "reviewer_inference"
+      ]
+    },
+    "occurrence_status": {
+      "enum": [
+        "occurred",
+        "ongoing",
+        "announced_not_occurred",
+        "expected_not_occurred",
+        "conditional_potential",
+        "hypothetical_risk",
+        "undetermined",
+        "not_applicable"
+      ]
+    },
+    "subject_key": {"type": "string", "minLength": 1},
+    "predicate": {"type": ["string", "null"]},
+    "object": {"type": ["object", "null"]},
+    "explicitness": {"enum": ["explicit", "estimated", "inferred"]},
+    "trust_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_integrity",
+        "source_authority",
+        "statement_attribution",
+        "semantic_directness",
+        "inference_depth",
+        "inference_premises",
+        "inference_bridge",
+        "temporal_eligibility",
+        "scope_fidelity",
+        "corroboration_state",
+        "contradiction_state",
+        "economic_truth_status",
+        "semantic_support_score",
+        "trust_tier"
+      ],
+      "properties": {
+        "evidence_integrity": {
+          "enum": ["verified", "verified_with_storage_gap", "unknown", "failed"]
+        },
+        "source_authority": {
+          "enum": [
+            "structured_sec_field",
+            "inline_xbrl_or_xml",
+            "filed_table",
+            "filed_primary_document",
+            "filed_exhibit",
+            "third_party_text_embedded_in_filing",
+            "reviewer_generated"
+          ]
+        },
+        "statement_attribution": {
+          "enum": [
+            "structured_sec_fact",
+            "issuer_reported_statement",
+            "management_estimate",
+            "management_interpretation",
+            "third_party_statement_in_filing",
+            "legal_or_regulatory_assertion",
+            "reviewer_inference"
+          ]
+        },
+        "semantic_directness": {
+          "enum": [
+            "exact_structured",
+            "explicit_text",
+            "normalized_explicit",
+            "composed_explicit",
+            "inferred"
+          ]
+        },
+        "inference_depth": {"type": "integer", "minimum": 0, "maximum": 3},
+        "inference_premises": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "inference_bridge": {"type": ["string", "null"], "maxLength": 400},
+        "temporal_eligibility": {
+          "enum": ["eligible_datetime", "eligible_date_only", "ineligible_future", "unknown"]
+        },
+        "scope_fidelity": {
+          "enum": ["exact", "bounded", "partial", "ambiguous", "not_comparable"]
+        },
+        "corroboration_state": {
+          "enum": [
+            "single_evidence",
+            "single_information_event",
+            "same_filing_independent_structure",
+            "prior_filing_consistent",
+            "cross_form_consistent",
+            "conflicted",
+            "not_applicable"
+          ]
+        },
+        "contradiction_state": {
+          "enum": [
+            "none",
+            "same_time_conflict",
+            "later_supersession",
+            "scope_conflict",
+            "measurement_conflict",
+            "unresolved"
+          ]
+        },
+        "economic_truth_status": {
+          "enum": [
+            "structurally_reported",
+            "issuer_attested",
+            "internally_corroborated",
+            "attributed_only",
+            "not_independently_assessed",
+            "contradicted_by_eligible_evidence",
+            "not_applicable"
+          ]
+        },
+        "semantic_support_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "trust_tier": {"enum": ["A", "B", "C", "D", "X"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"inference_depth": {"enum": [2, 3]}}},
+          "then": {
+            "properties": {"inference_bridge": {"type": "string", "minLength": 1}}
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {"properties": {"evidence_integrity": {"enum": ["unknown", "failed"]}}},
+              {"properties": {"temporal_eligibility": {"enum": ["ineligible_future", "unknown"]}}}
+            ]
+          },
+          "then": {"properties": {"trust_tier": {"const": "X"}}}
+        }
+      ]
+    },
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "status": {"const": "review_required"},
+    "effective_from": {"type": ["string", "null"], "format": "date-time"},
+    "effective_to": {"type": ["string", "null"], "format": "date-time"},
+    "delta_class": {
+      "type": ["string", "null"],
+      "enum": [
+        "new",
+        "removed",
+        "intensified",
+        "de_intensified",
+        "unchanged",
+        "wording_only",
+        "not_comparable",
+        null
+      ]
+    },
+    "rationale": {"type": "string", "minLength": 1, "maxLength": 900},
+    "limitations": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "reviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "model_version", "temperature"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "model_version": {"type": "string", "minLength": 1},
+        "temperature": {"type": "number", "minimum": 0}
+      }
+    },
+    "prompt_hash": {"type": "string", "minLength": 16},
+    "taxonomy_version": {"type": "string", "minLength": 1},
+    "trust_policy_version": {"const": "trust-semantics-v1"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "A"}}},
+      "then": {"properties": {"llm_route": {"const": "none"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "B"}}},
+      "then": {"properties": {"llm_route": {"const": "sampled_audit"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "C"}}},
+      "then": {"properties": {"llm_route": {"const": "mandatory"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "D1"}}},
+      "then": {"properties": {"llm_route": {"const": "grouped_mandatory"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "D2"}}},
+      "then": {
+        "properties": {
+          "llm_route": {"const": "aggregate_then_review"},
+          "routing_context": {
+            "properties": {"dedupe_cluster_id": {"type": "string", "minLength": 1}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "D3"}}},
+      "then": {"properties": {"llm_route": {"const": "no_default_review"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"const": "R"}}},
+      "then": {"properties": {"llm_route": {"const": "rejection_audit"}}}
+    },
+    {
+      "if": {"properties": {"input_promotion_level": {"enum": ["B", "R"]}}},
+      "then": {
+        "properties": {
+          "routing_context": {
+            "properties": {
+              "sample_rate": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+              "sample_seed": {"type": "string", "minLength": 1},
+              "sample_reason": {"type": "string", "minLength": 1},
+              "population_count": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"action": {"enum": ["accept", "reject", "supersede"]}}},
+      "then": {
+        "anyOf": [
+          {"required": ["reviewed_assertion_id"]},
+          {"required": ["reviewed_relation_id"]}
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"action": {"enum": ["supersede", "create_candidate"]}}},
+      "then": {"required": ["predicate", "object"]}
+    },
+    {
+      "if": {
+        "properties": {
+          "occurrence_status": {
+            "enum": [
+              "announced_not_occurred",
+              "expected_not_occurred",
+              "conditional_potential",
+              "hypothetical_risk"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {"predicate": {"const": "potential_event"}},
+        "required": ["predicate", "object"]
+      }
+    }
+  ]
+}

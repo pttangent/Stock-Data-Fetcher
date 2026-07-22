@@ -17,3 +17,8 @@ data/sec_yfinance/
 data/batches/
 reports/
 config/sec_pipeline.local.json
+data/
+*.parquet
+*.db
+*.csv
+*.log

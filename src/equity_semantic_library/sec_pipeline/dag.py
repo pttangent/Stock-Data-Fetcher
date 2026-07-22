@@ -275,20 +275,48 @@ class DagPipeline(DagWorkerMixin):
         return run_id
 
     def run(self, run_id: str) -> dict[str, Any]:
+        """Run the DAG. If workers config has only 1 worker total, run single-threaded."""
         self.stop_event.clear()
         threads: list[threading.Thread] = []
-        for lane, count in self.config.workers.as_dict().items():
-            for index in range(count):
-                worker_id = f"{lane}-{index + 1}"
-                thread = threading.Thread(target=self._worker_loop, args=(run_id, lane, worker_id), daemon=True)
-                thread.start()
-                threads.append(thread)
-        while self.store.pending_count(run_id) > 0:
-            self.store.cancel_blocked_tasks(run_id)
-            time.sleep(self.config.scheduler_poll_seconds)
-        self.stop_event.set()
-        for thread in threads:
-            thread.join(timeout=5)
+        worker_dict = self.config.workers.as_dict()
+        total_workers = sum(worker_dict.values())
+
+        if total_workers <= 1:
+            # Single-threaded: run one task at a time in main thread
+            while self.store.pending_count(run_id) > 0:
+                self.store.cancel_blocked_tasks(run_id)
+                # Find first ready task across all lanes
+                task = None
+                for lane in worker_dict:
+                    task = self.store.claim_task(
+                        run_id=run_id, lane=lane, worker_id="main",
+                        lease_seconds=self.config.task_lease_seconds,
+                    )
+                    if task is not None:
+                        break
+                if task is not None:
+                    try:
+                        result = self.handlers[task["task_type"]](task) or {}
+                        self.store.complete_task(task["task_id"], "main", result)
+                    except Exception as exc:
+                        self.store.fail_task(task, "main", exc)
+                else:
+                    time.sleep(self.config.scheduler_poll_seconds)
+        else:
+            # Multi-threaded
+            for lane, count in worker_dict.items():
+                for index in range(count):
+                    worker_id = f"{lane}-{index + 1}"
+                    thread = threading.Thread(target=self._worker_loop, args=(run_id, lane, worker_id), daemon=True)
+                    thread.start()
+                    threads.append(thread)
+            while self.store.pending_count(run_id) > 0:
+                self.store.cancel_blocked_tasks(run_id)
+                time.sleep(self.config.scheduler_poll_seconds)
+            self.stop_event.set()
+            for thread in threads:
+                thread.join(timeout=5)
+
         if self.write_queue is not None:
             self.write_queue.join()
             self.write_queue.stop()

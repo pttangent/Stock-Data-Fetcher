@@ -380,6 +380,11 @@ class DagWorkerMixin:
                WHERE s.symbol=? GROUP BY f.status""",
             (task["symbol"],),
         )
+        # Delete raw files after successful processing
+        symbol = task["symbol"]
+        raw_dir = Path(self.config.data_dir) / symbol[0] / symbol / "raw"
+        if raw_dir.exists():
+            shutil.rmtree(raw_dir, ignore_errors=True)
         return {"filings": {row["status"]: row["n"] for row in rows}}
 
 

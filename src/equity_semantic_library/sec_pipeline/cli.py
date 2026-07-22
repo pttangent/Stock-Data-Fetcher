@@ -8,7 +8,7 @@ import sys
 from .config import PipelineConfig
 from .dag import DagPipeline
 from .semantic_review import export_review_queue, import_review_decisions
-from .store import PipelineStore
+from .store import PipelineStore, WriteQueue
 
 
 def _config(args: argparse.Namespace, *, require_sec: bool) -> PipelineConfig:
@@ -57,6 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--refresh", action="store_true")
     run.add_argument("--no-yahoo", action="store_true")
+    run.add_argument("--max-workers", type=int, default=None, help="Override worker count per lane (default: use config)")
     archive = sub.add_parser("import-archive", help="Run deterministic structure/semantic workers on existing ticker ZIP archives")
     archive.add_argument("archives", nargs="+")
     archive.add_argument("--symbol", help="Fallback symbol when archive metadata lacks ticker")
@@ -148,7 +149,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     require_sec = args.command == "run" and _mode(args) != "structure"
     config = _config(args, require_sec=require_sec)
-    store = PipelineStore(config.db_path)
+    if getattr(args, "max_workers", None):
+        from .config import WorkerConfig
+        import tempfile
+        jsonable = config.to_jsonable()
+        jsonable["workers"] = {k: args.max_workers for k in config.workers.as_dict()}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write(json.dumps(jsonable))
+            tmp_path = f.name
+        config = PipelineConfig.from_json(tmp_path)
+        Path(tmp_path).unlink()
+    write_queue = WriteQueue()
+    store = PipelineStore(config.db_path, write_queue=write_queue)
     store.initialize()
     if args.command == "init":
         print(config.db_path)
